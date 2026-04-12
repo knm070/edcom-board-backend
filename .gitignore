@@ -1,0 +1,38 @@
+## .NET / ASP.NET Core
+bin/
+obj/
+*.user
+*.suo
+.vs/
+*.db
+*.db-shm
+*.db-wal
+
+## NuGet
+*.nupkg
+packages/
+project.lock.json
+project.fragment.lock.json
+
+## Build results
+[Dd]ebug/
+[Rr]elease/
+[Pp]ublish/
+x64/
+x86/
+build/
+
+## ASP.NET Core data-protection
+**/DataProtection-Keys/
+
+## Logs
+*.log
+logs/
+
+## Rider / JetBrains
+.idea/
+*.sln.iml
+
+## User-specific files
+*.rsuser
+.localhistory/
