@@ -2,6 +2,7 @@ namespace Edcom.Api.Infrastructure.Data.Entities;
 
 public enum SpaceType { Internal, External }
 public enum BoardTemplate { Kanban, Scrum }
+public enum SpaceStatus { Active, PendingTemplateSelection }
 
 public class Space
 {
@@ -10,6 +11,7 @@ public class Space
     public string Name { get; set; } = string.Empty;
     public SpaceType Type { get; set; }
     public BoardTemplate? BoardTemplate { get; set; }
+    public SpaceStatus Status { get; set; } = SpaceStatus.Active;
     public string IssueKeyPrefix { get; set; } = string.Empty;
     public int IssueCounter { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

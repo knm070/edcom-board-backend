@@ -10,6 +10,10 @@ public class CrossOrgTicket
     /// <summary>The mirror tracking ticket in the creator's Internal Space.</summary>
     public Guid? InternalMirrorIssueId { get; set; }
     public Guid CreatedById { get; set; }
+    /// <summary>Notes added by the receiver OrgTaskManager when marking Done.</summary>
+    public string? CompletionNotes { get; set; }
+    /// <summary>True when the creator org was soft-deleted mid-lifecycle; mirror creation is skipped.</summary>
+    public bool IsCreatorOrgDeleted { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 

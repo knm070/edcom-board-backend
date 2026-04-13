@@ -3,6 +3,7 @@ using Edcom.Api.Infrastructure.Data.Entities;
 using Edcom.Api.Modules.Authorization.Extensions;
 using Edcom.Api.Modules.Authorization.Services;
 using Edcom.Api.Modules.Issues.Dto;
+using Edcom.Api.Modules.Spaces.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -12,7 +13,7 @@ namespace Edcom.Api.Modules.Issues.Controllers;
 [ApiController]
 [Route("api/v1/spaces/{spaceId:guid}/issues")]
 [Authorize]
-public class IssuesController(AppDbContext db, IPermissionService perms) : ControllerBase
+public class IssuesController(AppDbContext db, IPermissionService perms, IWorkflowTransitionService transitions) : ControllerBase
 {
     private Guid CurrentUserId => User.GetUserId();
 
@@ -151,7 +152,7 @@ public class IssuesController(AppDbContext db, IPermissionService perms) : Contr
     {
         var space = await RequireSpaceMember(spaceId, ct);
 
-        if (!perms.CanChangeStatus(User, space.OrgId))
+        if (!perms.CanWriteTicket(User, space.OrgId))
             throw new UnauthorizedAccessException("You do not have permission to change ticket status.");
 
         var issue = await db.Issues
@@ -160,28 +161,10 @@ public class IssuesController(AppDbContext db, IPermissionService perms) : Contr
             .FirstOrDefaultAsync(i => i.Id == issueId && i.SpaceId == spaceId && i.DeletedAt == null, ct)
             ?? throw new KeyNotFoundException("Issue not found.");
 
-        // Enforce workflow transitions for Employers
-        if (!perms.CanBypassWorkflow(User, space.OrgId))
-        {
-            var transitionAllowed = await db.WorkflowTransitions.AnyAsync(
-                t => t.SpaceId == spaceId &&
-                     t.FromStatusId == issue.StatusId &&
-                     t.ToStatusId == req.StatusId,
-                ct);
-
-            // Also check system-level transitions (SpaceId = null) for External spaces
-            if (!transitionAllowed)
-                transitionAllowed = await db.WorkflowTransitions.AnyAsync(
-                    t => t.SpaceId == null &&
-                         t.FromStatusId == issue.StatusId &&
-                         t.ToStatusId == req.StatusId,
-                    ct);
-
-            if (!transitionAllowed)
-                throw new InvalidOperationException(
-                    "This status transition is not allowed by the workflow rules. " +
-                    "An OrgTaskManager can override this restriction.");
-        }
+        // Enforce workflow transitions via WorkflowTransitionService
+        var callerRole = User.GetOrgRole(space.OrgId)
+            ?? throw new UnauthorizedAccessException("You are not a member of this organization.");
+        await transitions.ValidateAsync(space, issue.StatusId, req.StatusId, callerRole, ct);
 
         issue.StatusId  = req.StatusId;
         issue.UpdatedAt = DateTime.UtcNow;

@@ -5,7 +5,9 @@ using Edcom.Api.Infrastructure.Data.Entities;
 using Edcom.Api.Infrastructure.Hubs;
 using Edcom.Api.Modules.Authorization.Policies;
 using Edcom.Api.Modules.Authorization.Services;
+using Edcom.Api.Modules.CrossOrgTickets.Services;
 using Edcom.Api.Modules.Identity.Services;
+using Edcom.Api.Modules.Spaces.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
@@ -137,6 +139,9 @@ builder.Services.AddCors(opt => opt.AddPolicy("Frontend", policy =>
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IPermissionService, PermissionService>();
+builder.Services.AddScoped<ISpaceProvisioningService, SpaceProvisioningService>();
+builder.Services.AddScoped<IWorkflowTransitionService, WorkflowTransitionService>();
+builder.Services.AddScoped<ICrossOrgTicketService, CrossOrgTicketService>();
 
 // ── App ──────────────────────────────────────────────────────
 var app = builder.Build();

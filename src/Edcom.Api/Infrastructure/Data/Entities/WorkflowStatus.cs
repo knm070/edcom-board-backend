@@ -24,6 +24,12 @@ public class WorkflowTransition
     public Guid? SpaceId { get; set; }
     public Guid FromStatusId { get; set; }
     public Guid ToStatusId { get; set; }
+    /// <summary>
+    /// JSON array of role strings that may use this transition,
+    /// e.g. ["OrgTaskManager","Employer"]. Null means all roles allowed.
+    /// OrgTaskManagers always bypass this check on internal spaces.
+    /// </summary>
+    public string? AllowedRolesJson { get; set; }
 
     public Space? Space { get; set; }
     public WorkflowStatus FromStatus { get; set; } = null!;

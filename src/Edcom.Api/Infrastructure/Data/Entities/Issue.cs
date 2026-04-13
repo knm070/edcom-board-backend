@@ -18,6 +18,10 @@ public class Issue
     public Guid? EpicId { get; set; }
     public Guid ReporterId { get; set; }
     public int? StoryPoints { get; set; }
+    /// <summary>Estimation in hours (used by external/cross-org tickets).</summary>
+    public decimal? EstimationHours { get; set; }
+    /// <summary>JSON array of { fileName, url, size } — set on cross-org ticket creation.</summary>
+    public string? FileAttachmentsJson { get; set; }
     public DateTime? DueDate { get; set; }
     public DateTime? DeletedAt { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

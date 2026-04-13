@@ -85,6 +85,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasIndex(x => x.IssueKeyPrefix).IsUnique();
             e.Property(x => x.Type).HasConversion<string>();
             e.Property(x => x.BoardTemplate).HasConversion<string>();
+            e.Property(x => x.Status).HasConversion<string>();
             e.HasOne(x => x.Organization).WithMany(o => o.Spaces)
                 .HasForeignKey(x => x.OrgId).OnDelete(DeleteBehavior.Restrict);
         });

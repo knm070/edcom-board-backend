@@ -5,6 +5,7 @@ using Edcom.Api.Modules.Authorization.Extensions;
 using Edcom.Api.Modules.Authorization.Policies;
 using Edcom.Api.Modules.Authorization.Services;
 using Edcom.Api.Modules.Organizations.Dto;
+using Edcom.Api.Modules.Spaces.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -14,7 +15,7 @@ namespace Edcom.Api.Modules.Organizations.Controllers;
 [ApiController]
 [Route("api/v1/orgs")]
 [Authorize]
-public class OrgsController(AppDbContext db, IPermissionService perms) : ControllerBase
+public class OrgsController(AppDbContext db, IPermissionService perms, ISpaceProvisioningService provisioning) : ControllerBase
 {
     private Guid CurrentUserId => User.GetUserId();
 
@@ -72,57 +73,9 @@ public class OrgsController(AppDbContext db, IPermissionService perms) : Control
             Role = MemberRole.OrgTaskManager
         });
 
-        // Generate unique prefixes: internal ends with I, external ends with X
-        // Take up to 3 letters from slug's word-only chars, then append I/X
-        var slugLetters = new string(slug.Where(char.IsLetter).ToArray()).ToUpper();
-        var basePrefix  = slugLetters[..Math.Min(3, slugLetters.Length)];
-        if (basePrefix.Length == 0) basePrefix = "ORG";
-
-        var internalPrefix = await UniquePrefix(basePrefix + "I", ct);
-        var externalPrefix = await UniquePrefix(basePrefix + "X", ct);
-
-        // Seed internal + external spaces
-        var internalSpace = new Space
-        {
-            OrgId = org.Id,
-            Name = $"{req.Name} Internal",
-            Type = SpaceType.Internal,
-            BoardTemplate = BoardTemplate.Scrum,
-            IssueKeyPrefix = internalPrefix
-        };
-        var externalSpace = new Space
-        {
-            OrgId = org.Id,
-            Name = $"{req.Name} External",
-            Type = SpaceType.External,
-            BoardTemplate = BoardTemplate.Kanban,
-            IssueKeyPrefix = externalPrefix
-        };
-        db.Spaces.AddRange(internalSpace, externalSpace);
-
-        // Seed internal workflow statuses
-        var internalStatuses = new[]
-        {
-            new WorkflowStatus { SpaceId = internalSpace.Id, Name = "Backlog",     Color = "#6B7280", Position = 0, IsInitial = true,  IsTerminal = false },
-            new WorkflowStatus { SpaceId = internalSpace.Id, Name = "To Do",       Color = "#3B82F6", Position = 1, IsInitial = false, IsTerminal = false },
-            new WorkflowStatus { SpaceId = internalSpace.Id, Name = "In Progress", Color = "#F59E0B", Position = 2, IsInitial = false, IsTerminal = false },
-            new WorkflowStatus { SpaceId = internalSpace.Id, Name = "In Review",   Color = "#8B5CF6", Position = 3, IsInitial = false, IsTerminal = false },
-            new WorkflowStatus { SpaceId = internalSpace.Id, Name = "Done",        Color = "#10B981", Position = 4, IsInitial = false, IsTerminal = true  },
-        };
-        db.WorkflowStatuses.AddRange(internalStatuses);
-
-        // Seed external (system) workflow statuses — check if already exist
-        var hasExternal = await db.WorkflowStatuses.AnyAsync(w => w.SpaceId == null, ct);
-        if (!hasExternal)
-        {
-            db.WorkflowStatuses.AddRange(
-                new WorkflowStatus { SpaceId = null, Name = "Backlog",     Color = "#6B7280", Position = 0, IsInitial = true,  IsTerminal = false },
-                new WorkflowStatus { SpaceId = null, Name = "To Do",       Color = "#3B82F6", Position = 1, IsInitial = false, IsTerminal = false },
-                new WorkflowStatus { SpaceId = null, Name = "In Progress", Color = "#F59E0B", Position = 2, IsInitial = false, IsTerminal = false },
-                new WorkflowStatus { SpaceId = null, Name = "In Review",   Color = "#8B5CF6", Position = 3, IsInitial = false, IsTerminal = false },
-                new WorkflowStatus { SpaceId = null, Name = "Done",        Color = "#10B981", Position = 4, IsInitial = false, IsTerminal = true  }
-            );
-        }
+        // Provision dual spaces (internal PendingTemplateSelection + external Active)
+        // and seed workflow statuses/transitions. Does not call SaveChanges.
+        await provisioning.StageAsync(org, ct);
 
         await db.SaveChangesAsync(ct);
 
@@ -279,13 +232,4 @@ public class OrgsController(AppDbContext db, IPermissionService perms) : Control
 
     private static string GenerateSlug(string name) =>
         Regex.Replace(name.ToLowerInvariant().Trim(), @"[^a-z0-9]+", "-").Trim('-');
-
-    private async Task<string> UniquePrefix(string candidate, CancellationToken ct)
-    {
-        var prefix = candidate;
-        var counter = 2;
-        while (await db.Spaces.AnyAsync(s => s.IssueKeyPrefix == prefix, ct))
-            prefix = candidate + counter++;
-        return prefix;
-    }
 }
