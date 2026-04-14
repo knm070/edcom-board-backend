@@ -18,6 +18,8 @@ public class Issue
     public Guid? EpicId { get; set; }
     public Guid ReporterId { get; set; }
     public int? StoryPoints { get; set; }
+    /// <summary>Zero-based ordering within the backlog (lower = higher priority).</summary>
+    public int BacklogOrder { get; set; }
     /// <summary>Estimation in hours (used by external/cross-org tickets).</summary>
     public decimal? EstimationHours { get; set; }
     /// <summary>JSON array of { fileName, url, size } — set on cross-org ticket creation.</summary>

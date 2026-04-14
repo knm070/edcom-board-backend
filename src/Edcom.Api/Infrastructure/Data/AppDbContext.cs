@@ -29,6 +29,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     // Cross-org
     public DbSet<CrossOrgTicket> CrossOrgTickets => Set<CrossOrgTicket>();
 
+    // Time tracking
+    public DbSet<Worklog> Worklogs => Set<Worklog>();
+
+    // Velocity history
+    public DbSet<SprintVelocityRecord> SprintVelocityRecords => Set<SprintVelocityRecord>();
+
     // Collaboration
     public DbSet<Comment> Comments => Set<Comment>();
     public DbSet<Notification> Notifications => Set<Notification>();
@@ -209,6 +215,27 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne(x => x.Organization).WithMany()
                 .HasForeignKey(x => x.OrgId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ── Worklog ─────────────────────────────────────────────
+        mb.Entity<Worklog>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasOne(x => x.Issue).WithMany()
+                .HasForeignKey(x => x.IssueId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.User).WithMany()
+                .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ── SprintVelocityRecord ────────────────────────────────
+        mb.Entity<SprintVelocityRecord>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.SprintId).IsUnique(); // one record per sprint
+            e.HasOne(x => x.Sprint).WithMany()
+                .HasForeignKey(x => x.SprintId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Space).WithMany()
+                .HasForeignKey(x => x.SpaceId).OnDelete(DeleteBehavior.Restrict);
         });
     }
 }

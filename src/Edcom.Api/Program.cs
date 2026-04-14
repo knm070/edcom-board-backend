@@ -178,6 +178,9 @@ if (app.Environment.IsDevelopment())
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.EnsureCreated();
 
+    // Additive column migrations for SQLite (EnsureCreated won't add new columns to existing DBs)
+    ApplyDevMigrations(db);
+
     const string adminEmail = "admin@edcom.dev";
     if (!db.Users.Any(u => u.Email == adminEmail))
     {
@@ -203,3 +206,88 @@ app.MapGet("/health", () => Results.Ok(new { status = "healthy", timestamp = Dat
    .AllowAnonymous();
 
 app.Run();
+
+// ── Dev schema migrations (SQLite only) ──────────────────────
+// EnsureCreated won't add columns to existing tables.
+// Each entry here is idempotent — safe to run on every startup.
+static void ApplyDevMigrations(AppDbContext db)
+{
+    var conn = db.Database.GetDbConnection();
+    if (conn.State != System.Data.ConnectionState.Open)
+        conn.Open();
+
+    void AddColumnIfMissing(string table, string column, string sqlDef)
+    {
+        using var pragmaCmd = conn.CreateCommand();
+        pragmaCmd.CommandText = $"PRAGMA table_info(\"{table}\")";
+        using var reader = pragmaCmd.ExecuteReader();
+        var found = false;
+        while (reader.Read())
+        {
+            if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+            {
+                found = true;
+                break;
+            }
+        }
+        reader.Close();
+
+        if (!found)
+        {
+            using var alterCmd = conn.CreateCommand();
+            alterCmd.CommandText = $"ALTER TABLE \"{table}\" ADD COLUMN \"{column}\" {sqlDef}";
+            alterCmd.ExecuteNonQuery();
+        }
+    }
+
+    // Spaces
+    AddColumnIfMissing("Spaces", "Status",        "TEXT NOT NULL DEFAULT 'Active'");
+    AddColumnIfMissing("Spaces", "BoardTemplate",  "TEXT");
+    AddColumnIfMissing("Spaces", "UpdatedAt",      "TEXT NOT NULL DEFAULT '0001-01-01 00:00:00'");
+
+    // Issues
+    AddColumnIfMissing("Issues", "StoryPoints",          "INTEGER");
+    AddColumnIfMissing("Issues", "BacklogOrder",         "INTEGER NOT NULL DEFAULT 0");
+    AddColumnIfMissing("Issues", "FileAttachmentsJson",  "TEXT");
+    AddColumnIfMissing("Issues", "EstimationHours",      "REAL");
+    AddColumnIfMissing("Issues", "UpdatedAt",            "TEXT NOT NULL DEFAULT '0001-01-01 00:00:00'");
+
+    // Sprints
+    AddColumnIfMissing("Sprints", "Goal",       "TEXT");
+    AddColumnIfMissing("Sprints", "StartDate",  "TEXT");
+    AddColumnIfMissing("Sprints", "EndDate",    "TEXT");
+    AddColumnIfMissing("Sprints", "UpdatedAt",  "TEXT NOT NULL DEFAULT '0001-01-01 00:00:00'");
+
+    // New tables — EnsureCreated won't add these to an existing DB
+    void ExecIfNotExists(string sql)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        cmd.ExecuteNonQuery();
+    }
+
+    ExecIfNotExists("""
+        CREATE TABLE IF NOT EXISTS "Worklogs" (
+            "Id"          TEXT NOT NULL PRIMARY KEY,
+            "IssueId"     TEXT NOT NULL REFERENCES "Issues"("Id") ON DELETE CASCADE,
+            "UserId"      TEXT NOT NULL REFERENCES "Users"("Id"),
+            "Hours"       REAL NOT NULL,
+            "Description" TEXT,
+            "Date"        TEXT NOT NULL,
+            "CreatedAt"   TEXT NOT NULL DEFAULT '0001-01-01 00:00:00'
+        )
+        """);
+
+    ExecIfNotExists("""
+        CREATE TABLE IF NOT EXISTS "SprintVelocityRecords" (
+            "Id"               TEXT NOT NULL PRIMARY KEY,
+            "SprintId"         TEXT NOT NULL UNIQUE REFERENCES "Sprints"("Id") ON DELETE CASCADE,
+            "SpaceId"          TEXT NOT NULL REFERENCES "Spaces"("Id"),
+            "CommittedPoints"  INTEGER NOT NULL DEFAULT 0,
+            "CompletedPoints"  INTEGER NOT NULL DEFAULT 0,
+            "CompletedAt"      TEXT NOT NULL DEFAULT '0001-01-01 00:00:00'
+        )
+        """);
+
+    conn.Close();
+}

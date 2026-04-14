@@ -30,6 +30,18 @@ public record MoveIssueRequest(Guid StatusId);
 
 public record AssignIssueRequest(List<Guid> AssigneeIds);
 
+public record ReorderIssuesRequest(List<Guid> OrderedIds);
+
+public record BulkUpdateIssueRequest(
+    List<Guid> IssueIds,
+    Guid? SprintId,
+    bool ClearSprint,
+    string? Priority,
+    Guid? EpicId,
+    bool ClearEpic,
+    bool Delete
+);
+
 // ── Responses ────────────────────────────────────────────────────────────────
 public record IssueListDto(
     Guid Id,
