@@ -5,7 +5,6 @@ using Edcom.Api.Modules.Authorization.Extensions;
 using Edcom.Api.Modules.Authorization.Policies;
 using Edcom.Api.Modules.Authorization.Services;
 using Edcom.Api.Modules.Organizations.Dto;
-using Edcom.Api.Modules.Spaces.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -13,9 +12,9 @@ using Microsoft.EntityFrameworkCore;
 namespace Edcom.Api.Modules.Organizations.Controllers;
 
 [ApiController]
-[Route("api/v1/orgs")]
+[Route("api/orgs")]
 [Authorize]
-public class OrgsController(AppDbContext db, IPermissionService perms, ISpaceProvisioningService provisioning) : ControllerBase
+public class OrgsController(AppDbContext db, IPermissionService perms) : ControllerBase
 {
     private Guid CurrentUserId => User.GetUserId();
 
@@ -29,7 +28,9 @@ public class OrgsController(AppDbContext db, IPermissionService perms, ISpacePro
                 .ThenInclude(o => o.Members)
             .Include(m => m.Organization)
                 .ThenInclude(o => o.Spaces)
-            .Where(m => m.UserId == userId && m.Organization.IsActive)
+            .Where(m => m.UserId == userId
+                     && m.Organization.IsActive
+                     && m.Organization.Status == OrgStatus.Active)
             .ToListAsync(ct);
 
         return memberships.Select(m => new OrgDto(
@@ -44,10 +45,10 @@ public class OrgsController(AppDbContext db, IPermissionService perms, ISpacePro
         )).ToList();
     }
 
-    // ── POST /api/v1/orgs  ────────────────────────────────────────────────────
-    [HttpPost]
-    [Authorize(Policy = EdcomPolicies.SystemAdmin)]   // Admin only
-    public async Task<ActionResult<OrgDto>> Create(
+    // ── POST /api/v1/orgs/request  ────────────────────────────────────────────
+    // Any authenticated user can request org creation.
+    [HttpPost("request")]
+    public async Task<ActionResult<OrgDto>> RequestCreate(
         [FromBody] CreateOrgRequest req, CancellationToken ct)
     {
         var userId = CurrentUserId;
@@ -58,29 +59,17 @@ public class OrgsController(AppDbContext db, IPermissionService perms, ISpacePro
 
         var org = new Organization
         {
-            Name = req.Name,
-            Slug = slug,
-            LogoUrl = req.LogoUrl,
-            CreatedById = userId
+            Name        = req.Name,
+            Slug        = slug,
+            LogoUrl     = req.LogoUrl,
+            CreatedById = userId,
+            Status      = OrgStatus.Pending,
         };
         db.Organizations.Add(org);
-
-        // Creator becomes OrgTaskManager
-        db.OrgMembers.Add(new OrgMember
-        {
-            OrgId = org.Id,
-            UserId = userId,
-            Role = MemberRole.OrgTaskManager
-        });
-
-        // Provision dual spaces (internal PendingTemplateSelection + external Active)
-        // and seed workflow statuses/transitions. Does not call SaveChanges.
-        await provisioning.StageAsync(org, ct);
-
         await db.SaveChangesAsync(ct);
 
         return CreatedAtAction(nameof(GetById), new { orgId = org.Id }, new OrgDto(
-            org.Id, org.Name, org.Slug, org.LogoUrl, MemberRole.OrgTaskManager.ToString(), 1, 2, org.CreatedAt));
+            org.Id, org.Name, org.Slug, org.LogoUrl, string.Empty, 0, 0, org.CreatedAt));
     }
 
     // ── GET /api/v1/orgs/{orgId}  ─────────────────────────────────────────────
@@ -93,7 +82,9 @@ public class OrgsController(AppDbContext db, IPermissionService perms, ISpacePro
                 .ThenInclude(o => o.Members)
             .Include(m => m.Organization)
                 .ThenInclude(o => o.Spaces)
-            .FirstOrDefaultAsync(m => m.OrgId == orgId && m.UserId == userId && m.Organization.IsActive, ct)
+            .FirstOrDefaultAsync(m => m.OrgId == orgId && m.UserId == userId
+                                   && m.Organization.IsActive
+                                   && m.Organization.Status == OrgStatus.Active, ct)
             ?? throw new KeyNotFoundException("Organization not found or you are not a member.");
 
         var org = membership.Organization;
@@ -110,26 +101,93 @@ public class OrgsController(AppDbContext db, IPermissionService perms, ISpacePro
         var org = await db.Organizations.FindAsync([orgId], ct)
             ?? throw new KeyNotFoundException("Organization not found.");
 
-        org.Name = req.Name;
+        org.Name    = req.Name;
         org.LogoUrl = req.LogoUrl;
         org.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
 
         var memberCount = await db.OrgMembers.CountAsync(m => m.OrgId == orgId, ct);
         var spaceCount  = await db.Spaces.CountAsync(s => s.OrgId == orgId, ct);
+        var currentRole = User.GetOrgRole(orgId)?.ToString() ?? OrgRole.OrgManager.ToString();
         return new OrgDto(org.Id, org.Name, org.Slug, org.LogoUrl,
-            MemberRole.OrgTaskManager.ToString(), memberCount, spaceCount, org.CreatedAt);
+            currentRole, memberCount, spaceCount, org.CreatedAt);
     }
 
     // ── DELETE /api/v1/orgs/{orgId}  ──────────────────────────────────────────
     [HttpDelete("{orgId:guid}")]
-    [Authorize(Policy = EdcomPolicies.SystemAdmin)]   // Admin only
+    [Authorize(Policy = EdcomPolicies.SystemAdminOnly)]
     public async Task<IActionResult> Delete(Guid orgId, CancellationToken ct)
     {
         var org = await db.Organizations.FindAsync([orgId], ct)
             ?? throw new KeyNotFoundException("Organization not found.");
-        org.IsActive = false;
+        org.IsActive  = false;
         org.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
+    // ── GET /api/v1/orgs/admin/pending  ───────────────────────────────────────
+    [HttpGet("admin/pending")]
+    [Authorize(Policy = EdcomPolicies.SystemAdminOnly)]
+    public async Task<ActionResult<List<OrgPendingDto>>> GetPendingOrgs(CancellationToken ct)
+    {
+        var pending = await db.Organizations
+            .Include(o => o.CreatedBy)
+            .Where(o => o.Status == OrgStatus.Pending && o.IsActive)
+            .OrderBy(o => o.CreatedAt)
+            .ToListAsync(ct);
+
+        return pending.Select(o => new OrgPendingDto(
+            o.Id, o.Name, o.Slug, o.LogoUrl,
+            o.CreatedById, o.CreatedBy.FullName, o.CreatedBy.Email,
+            o.CreatedAt)).ToList();
+    }
+
+    // ── POST /api/v1/orgs/admin/{orgId}/approve  ──────────────────────────────
+    [HttpPost("admin/{orgId:guid}/approve")]
+    [Authorize(Policy = EdcomPolicies.SystemAdminOnly)]
+    public async Task<ActionResult<OrgDto>> ApproveOrg(Guid orgId, CancellationToken ct)
+    {
+        var org = await db.Organizations.FindAsync([orgId], ct)
+            ?? throw new KeyNotFoundException("Organization not found.");
+
+        if (org.Status != OrgStatus.Pending)
+            throw new InvalidOperationException("Only Pending organizations can be approved.");
+
+        org.Status    = OrgStatus.Active;
+        org.UpdatedAt = DateTime.UtcNow;
+
+        // Make the creator an OrgManager
+        if (!await db.OrgMembers.AnyAsync(m => m.OrgId == orgId && m.UserId == org.CreatedById, ct))
+        {
+            db.OrgMembers.Add(new OrgMember
+            {
+                OrgId   = orgId,
+                UserId  = org.CreatedById,
+                Role    = OrgRole.OrgManager,
+            });
+        }
+
+        await db.SaveChangesAsync(ct);
+        return new OrgDto(org.Id, org.Name, org.Slug, org.LogoUrl,
+            OrgRole.OrgManager.ToString(), 1, 0, org.CreatedAt);
+    }
+
+    // ── POST /api/v1/orgs/admin/{orgId}/reject  ───────────────────────────────
+    [HttpPost("admin/{orgId:guid}/reject")]
+    [Authorize(Policy = EdcomPolicies.SystemAdminOnly)]
+    public async Task<IActionResult> RejectOrg(
+        Guid orgId, [FromBody] RejectOrgRequest req, CancellationToken ct)
+    {
+        var org = await db.Organizations.FindAsync([orgId], ct)
+            ?? throw new KeyNotFoundException("Organization not found.");
+
+        if (org.Status != OrgStatus.Pending)
+            throw new InvalidOperationException("Only Pending organizations can be rejected.");
+
+        org.Status          = OrgStatus.Rejected;
+        org.RejectionReason = req.Reason;
+        org.UpdatedAt       = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
         return NoContent();
     }
@@ -162,14 +220,14 @@ public class OrgsController(AppDbContext db, IPermissionService perms, ISpacePro
         if (await db.OrgMembers.AnyAsync(m => m.OrgId == orgId && m.UserId == user.Id, ct))
             throw new InvalidOperationException("User is already a member of this organization.");
 
-        if (!Enum.TryParse<MemberRole>(req.Role, out var role))
-            throw new InvalidOperationException("Invalid role. Use 'OrgTaskManager' or 'Employer'.");
+        if (!Enum.TryParse<OrgRole>(req.Role, out var role))
+            throw new InvalidOperationException("Invalid role. Use 'OrgManager', 'SpaceManager', or 'Employer'.");
 
         var member = new OrgMember
         {
-            OrgId = orgId,
-            UserId = user.Id,
-            Role = role,
+            OrgId       = orgId,
+            UserId      = user.Id,
+            Role        = role,
             InvitedById = CurrentUserId
         };
         db.OrgMembers.Add(member);
@@ -179,14 +237,14 @@ public class OrgsController(AppDbContext db, IPermissionService perms, ISpacePro
             role.ToString(), member.JoinedAt);
     }
 
-    // ── PATCH /api/v1/orgs/{orgId}/members/{userId}  ─────────────────────────
+    // ── PATCH /api/v1/orgs/{orgId}/members/{memberId}  ───────────────────────
     [HttpPatch("{orgId:guid}/members/{memberId:guid}")]
     public async Task<IActionResult> UpdateMemberRole(
         Guid orgId, Guid memberId, [FromBody] UpdateMemberRoleRequest req, CancellationToken ct)
     {
         RequirePermission(perms.CanManageMembers(User, orgId));
 
-        if (!Enum.TryParse<MemberRole>(req.Role, out var role))
+        if (!Enum.TryParse<OrgRole>(req.Role, out var role))
             throw new InvalidOperationException("Invalid role.");
 
         var member = await db.OrgMembers
@@ -198,7 +256,7 @@ public class OrgsController(AppDbContext db, IPermissionService perms, ISpacePro
         return NoContent();
     }
 
-    // ── DELETE /api/v1/orgs/{orgId}/members/{userId}  ────────────────────────
+    // ── DELETE /api/v1/orgs/{orgId}/members/{memberId}  ──────────────────────
     [HttpDelete("{orgId:guid}/members/{memberId:guid}")]
     public async Task<IActionResult> RemoveMember(
         Guid orgId, Guid memberId, CancellationToken ct)
@@ -216,18 +274,9 @@ public class OrgsController(AppDbContext db, IPermissionService perms, ISpacePro
 
     // ── Helpers  ──────────────────────────────────────────────────────────────
 
-    /// <summary>Throws 401 if the caller does not satisfy the permission check.</summary>
     private void RequirePermission(bool allowed, string message = "You do not have permission to perform this action.")
     {
         if (!allowed) throw new UnauthorizedAccessException(message);
-    }
-
-    /// <summary>Verifies membership via DB (for endpoints that pre-date the RBAC claims).</summary>
-    private async Task RequireMembership(Guid orgId, CancellationToken ct)
-    {
-        var userId = CurrentUserId;
-        if (!await db.OrgMembers.AnyAsync(m => m.OrgId == orgId && m.UserId == userId, ct))
-            throw new UnauthorizedAccessException("You are not a member of this organization.");
     }
 
     private static string GenerateSlug(string name) =>

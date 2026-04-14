@@ -20,9 +20,7 @@ public class Issue
     public int? StoryPoints { get; set; }
     /// <summary>Zero-based ordering within the backlog (lower = higher priority).</summary>
     public int BacklogOrder { get; set; }
-    /// <summary>Estimation in hours (used by external/cross-org tickets).</summary>
     public decimal? EstimationHours { get; set; }
-    /// <summary>JSON array of { fileName, url, size } — set on cross-org ticket creation.</summary>
     public string? FileAttachmentsJson { get; set; }
     public DateTime? DueDate { get; set; }
     public DateTime? DeletedAt { get; set; }
@@ -38,8 +36,6 @@ public class Issue
     public ICollection<IssueAssignee> Assignees { get; set; } = [];
     public ICollection<Comment> Comments { get; set; } = [];
     public ICollection<ActivityLog> ActivityLogs { get; set; } = [];
-    public CrossOrgTicket? CrossOrgTicketAsExternal { get; set; }
-    public CrossOrgTicket? CrossOrgTicketAsMirror { get; set; }
 }
 
 public class IssueAssignee

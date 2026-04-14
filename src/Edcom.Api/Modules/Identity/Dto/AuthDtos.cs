@@ -37,6 +37,7 @@ public record UserDto(
 public record OrgRoleDto(
     Guid OrgId,
     string OrgName,
-    string Role,
+    string OrgSlug,
+    string Role,        // "OrgManager" | "SpaceManager" | "Employer"
     DateTime JoinedAt
 );

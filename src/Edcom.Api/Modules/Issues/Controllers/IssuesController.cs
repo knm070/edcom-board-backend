@@ -1,8 +1,10 @@
 using Edcom.Api.Infrastructure.Data;
 using Edcom.Api.Infrastructure.Data.Entities;
+using Edcom.Api.Infrastructure.Results;
 using Edcom.Api.Modules.Authorization.Extensions;
 using Edcom.Api.Modules.Authorization.Services;
 using Edcom.Api.Modules.Issues.Dto;
+using Edcom.Api.Modules.Issues.Services;
 using Edcom.Api.Modules.Spaces.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -11,9 +13,9 @@ using Microsoft.EntityFrameworkCore;
 namespace Edcom.Api.Modules.Issues.Controllers;
 
 [ApiController]
-[Route("api/v1/spaces/{spaceId:guid}/issues")]
+[Route("api/spaces/{spaceId:guid}/issues")]
 [Authorize]
-public class IssuesController(AppDbContext db, IPermissionService perms, IWorkflowTransitionService transitions) : ControllerBase
+public class IssuesController(AppDbContext db, IPermissionService perms, IWorkflowTransitionService transitions, ITicketService ticketService) : ControllerBase
 {
     private Guid CurrentUserId => User.GetUserId();
 
@@ -58,56 +60,18 @@ public class IssuesController(AppDbContext db, IPermissionService perms, IWorkfl
 
     // ── POST /api/v1/spaces/{spaceId}/issues ─────────────────────────────────
     [HttpPost]
-    public async Task<ActionResult<IssueDetailDto>> Create(
+    public async Task<IActionResult> Create(
         Guid spaceId, [FromBody] CreateIssueRequest req, CancellationToken ct)
     {
-        var space = await RequireSpaceMember(spaceId, ct);
+        await RequireSpaceMember(spaceId, ct);
+        var result = await ticketService.CreateAsync(spaceId, req, User, ct);
 
-        if (!perms.CanWriteTicket(User, space.OrgId))
-            return Forbid();
-
-        if (!Enum.TryParse<IssueType>(req.Type, out var type))
-            return BadRequest("Invalid issue type.");
-        if (!Enum.TryParse<IssuePriority>(req.Priority, out var priority))
-            return BadRequest("Invalid priority.");
-
-        // Atomic counter increment — safe under concurrent load on both SQLite and PostgreSQL
-        await db.Database.ExecuteSqlInterpolatedAsync(
-            $"UPDATE \"Spaces\" SET \"IssueCounter\" = \"IssueCounter\" + 1, \"UpdatedAt\" = {DateTime.UtcNow} WHERE \"Id\" = {spaceId}", ct);
-        await db.Entry(space).ReloadAsync(ct);
-
-        var issue = new Issue
-        {
-            SpaceId     = spaceId,
-            OrgId       = space.OrgId,
-            KeyNumber   = space.IssueCounter,
-            Title       = req.Title,
-            Description = req.Description,
-            Type        = type,
-            Priority    = priority,
-            StatusId    = req.StatusId,
-            SprintId    = req.SprintId,
-            EpicId      = req.EpicId,
-            ReporterId  = CurrentUserId,
-            StoryPoints = req.StoryPoints,
-            DueDate     = req.DueDate,
-        };
-        db.Issues.Add(issue);
-
-        if (req.AssigneeIds?.Count > 0)
-        {
-            foreach (var uid in req.AssigneeIds)
-                db.Set<IssueAssignee>().Add(new IssueAssignee
-                {
-                    IssueId = issue.Id, UserId = uid, AssignedById = CurrentUserId
-                });
-        }
-
-        await db.SaveChangesAsync(ct);
-
-        var full = await LoadFullIssue(issue.Id, ct);
-        return CreatedAtAction(nameof(GetById), new { spaceId, issueId = issue.Id },
-            ToDetailDto(full, space.IssueKeyPrefix));
+        return result.Match(
+            onSuccess: dto => (IActionResult)CreatedAtAction(nameof(GetById), new { spaceId, issueId = dto.Id }, dto),
+            onFailure: failure => (IActionResult)BadRequest(new { code = failure.Code, message = failure.Message }),
+            onUnauthorized: _ => (IActionResult)Forbid(),
+            onNotFound: notFound => (IActionResult)NotFound(new { entity = notFound.Entity }),
+            onConflict: conflict => (IActionResult)Conflict(new { message = conflict.Message }));
     }
 
     // ── GET /api/v1/spaces/{spaceId}/issues/{issueId} ────────────────────────
@@ -124,29 +88,18 @@ public class IssuesController(AppDbContext db, IPermissionService perms, IWorkfl
 
     // ── PATCH /api/v1/spaces/{spaceId}/issues/{issueId} ──────────────────────
     [HttpPatch("{issueId:guid}")]
-    public async Task<ActionResult<IssueDetailDto>> Update(
+    public async Task<IActionResult> Update(
         Guid spaceId, Guid issueId, [FromBody] UpdateIssueRequest req, CancellationToken ct)
     {
-        var space = await RequireSpaceMember(spaceId, ct);
-        var issue = await db.Issues.FindAsync([issueId], ct)
-            ?? throw new KeyNotFoundException("Issue not found.");
-        if (issue.SpaceId != spaceId) return NotFound();
+        await RequireSpaceMember(spaceId, ct);
+        var result = await ticketService.UpdateAsync(spaceId, issueId, req, User, ct);
 
-        if (req.Title       != null) issue.Title       = req.Title;
-        if (req.Description != null) issue.Description = req.Description;
-        if (req.StoryPoints != null) issue.StoryPoints = req.StoryPoints;
-        if (req.DueDate     != null) issue.DueDate     = req.DueDate;
-        if (req.SprintId    != null) issue.SprintId    = req.SprintId;
-        if (req.EpicId      != null) issue.EpicId      = req.EpicId;
-        if (req.StatusId    != null) issue.StatusId    = req.StatusId.Value;
-        if (req.Type     != null && Enum.TryParse<IssueType>(req.Type, out var t))     issue.Type     = t;
-        if (req.Priority != null && Enum.TryParse<IssuePriority>(req.Priority, out var pr)) issue.Priority = pr;
-
-        issue.UpdatedAt = DateTime.UtcNow;
-        await db.SaveChangesAsync(ct);
-
-        var full = await LoadFullIssue(issueId, ct);
-        return ToDetailDto(full, space.IssueKeyPrefix);
+        return result.Match(
+            onSuccess: dto => (IActionResult)Ok(dto),
+            onFailure: failure => (IActionResult)BadRequest(new { code = failure.Code, message = failure.Message }),
+            onUnauthorized: _ => (IActionResult)Forbid(),
+            onNotFound: notFound => (IActionResult)NotFound(new { entity = notFound.Entity }),
+            onConflict: conflict => (IActionResult)Conflict(new { message = conflict.Message }));
     }
 
     // ── POST /api/v1/spaces/{spaceId}/issues/reorder ─────────────────────────
@@ -309,6 +262,137 @@ public class IssuesController(AppDbContext db, IPermissionService perms, IWorkfl
         await db.Entry(comment).Reference(c => c.Author).LoadAsync(ct);
         return new CommentDto(comment.Id, comment.AuthorId, comment.Author.FullName,
             comment.Author.AvatarUrl, comment.Body, comment.ParentId, comment.CreatedAt);
+    }
+
+    // ── POST /api/v1/spaces/{spaceId}/issues/{issueId}/worklogs ───────────────
+    [HttpPost("{issueId:guid}/worklogs")]
+    public async Task<IActionResult> LogTime(
+        Guid spaceId, Guid issueId,
+        [FromBody] LogTimeRequest req, CancellationToken ct)
+    {
+        await RequireSpaceMember(spaceId, ct);
+        var result = await ticketService.LogTimeAsync(spaceId, issueId, req, User, ct);
+
+        return result.Match(
+            onSuccess: _ => (IActionResult)NoContent(),
+            onFailure: failure => (IActionResult)BadRequest(new { code = failure.Code, message = failure.Message }),
+            onUnauthorized: _ => (IActionResult)Forbid(),
+            onNotFound: notFound => (IActionResult)NotFound(new { entity = notFound.Entity }),
+            onConflict: conflict => (IActionResult)Conflict(new { message = conflict.Message }));
+    }
+
+    // ── GET /api/v1/spaces/{spaceId}/issues/{issueId}/worklogs ────────────────
+    [HttpGet("{issueId:guid}/worklogs")]
+    public async Task<ActionResult<List<WorklogDto>>> GetWorklogs(
+        Guid spaceId, Guid issueId, CancellationToken ct)
+    {
+        await RequireSpaceMember(spaceId, ct);
+
+        var issue = await db.Issues
+            .Include(i => i.Space)
+            .FirstOrDefaultAsync(i => i.Id == issueId && i.SpaceId == spaceId && i.DeletedAt == null, ct);
+
+        if (issue is null)
+            return NotFound();
+
+        var worklogs = await db.Set<Worklog>()
+            .Where(w => w.IssueId == issueId)
+            .Include(w => w.User)
+            .OrderByDescending(w => w.Date)
+            .ThenByDescending(w => w.CreatedAt)
+            .ToListAsync(ct);
+
+        return worklogs.Select(w => new WorklogDto(
+            w.Id, w.IssueId, w.UserId, w.User.FullName, w.User.AvatarUrl,
+            w.Hours, w.Description, w.Date, w.CreatedAt)).ToList();
+    }
+
+    // ── GET /api/v1/spaces/{spaceId}/issues/{issueId}/activity ────────────────
+    [HttpGet("{issueId:guid}/activity")]
+    public async Task<ActionResult<List<ActivityLogDto>>> GetActivityLog(
+        Guid spaceId, Guid issueId, CancellationToken ct)
+    {
+        await RequireSpaceMember(spaceId, ct);
+
+        var issue = await db.Issues
+            .FirstOrDefaultAsync(i => i.Id == issueId && i.SpaceId == spaceId && i.DeletedAt == null, ct);
+
+        if (issue is null)
+            return NotFound();
+
+        var activityLogs = await db.Set<ActivityLog>()
+            .Where(a => a.IssueId == issueId)
+            .Include(a => a.Actor)
+            .OrderByDescending(a => a.CreatedAt)
+            .ToListAsync(ct);
+
+        return activityLogs.Select(a => new ActivityLogDto(
+            a.Id, a.IssueId, a.ActorId, a.Actor.FullName, a.Actor.AvatarUrl,
+            a.Action, a.Metadata, a.CreatedAt)).ToList();
+    }
+
+    // ── PATCH /api/v1/spaces/{spaceId}/issues/{issueId}/worklogs/{worklogId} ──
+    [HttpPatch("{issueId:guid}/worklogs/{worklogId:guid}")]
+    public async Task<ActionResult<WorklogDto>> UpdateWorklog(
+        Guid spaceId, Guid issueId, Guid worklogId,
+        [FromBody] UpdateWorklogRequest req, CancellationToken ct)
+    {
+        var userId = CurrentUserId;
+        await RequireSpaceMember(spaceId, ct);
+
+        var worklog = await db.Set<Worklog>()
+            .Include(w => w.User)
+            .FirstOrDefaultAsync(w => w.Id == worklogId && w.IssueId == issueId, ct);
+
+        if (worklog is null)
+            return NotFound();
+
+        // Only the author or managers can update
+        var space = await db.Spaces.FindAsync([spaceId], ct)
+            ?? throw new KeyNotFoundException("Space not found.");
+        var userRole = User.GetOrgRole(space.OrgId);
+        if (worklog.UserId != userId && (userRole is null || userRole != OrgRole.OrgManager))
+            return Forbid();
+
+        if (req.Hours.HasValue)
+            worklog.Hours = req.Hours.Value;
+        if (req.Description != null)
+            worklog.Description = req.Description;
+        if (req.Date.HasValue)
+            worklog.Date = req.Date.Value;
+
+        await db.SaveChangesAsync(ct);
+
+        return new WorklogDto(
+            worklog.Id, worklog.IssueId, worklog.UserId, worklog.User.FullName, worklog.User.AvatarUrl,
+            worklog.Hours, worklog.Description, worklog.Date, worklog.CreatedAt);
+    }
+
+    // ── DELETE /api/v1/spaces/{spaceId}/issues/{issueId}/worklogs/{worklogId} ─
+    [HttpDelete("{issueId:guid}/worklogs/{worklogId:guid}")]
+    public async Task<IActionResult> DeleteWorklog(
+        Guid spaceId, Guid issueId, Guid worklogId, CancellationToken ct)
+    {
+        var userId = CurrentUserId;
+        await RequireSpaceMember(spaceId, ct);
+
+        var worklog = await db.Set<Worklog>()
+            .FirstOrDefaultAsync(w => w.Id == worklogId && w.IssueId == issueId, ct);
+
+        if (worklog is null)
+            return NotFound();
+
+        // Only the author or managers can delete
+        var space = await db.Spaces.FindAsync([spaceId], ct)
+            ?? throw new KeyNotFoundException("Space not found.");
+        var userRole = User.GetOrgRole(space.OrgId);
+        if (worklog.UserId != userId && (userRole is null || userRole != OrgRole.OrgManager))
+            return Forbid();
+
+        db.Set<Worklog>().Remove(worklog);
+        await db.SaveChangesAsync(ct);
+
+        return NoContent();
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

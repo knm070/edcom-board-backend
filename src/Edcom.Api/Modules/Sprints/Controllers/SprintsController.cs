@@ -9,7 +9,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Edcom.Api.Modules.Sprints.Controllers;
 
 [ApiController]
-[Route("api/v1/spaces/{spaceId:guid}/sprints")]
+[Route("api/spaces/{spaceId:guid}/sprints")]
 [Authorize]
 public class SprintsController(AppDbContext db) : ControllerBase
 {
@@ -50,7 +50,7 @@ public class SprintsController(AppDbContext db) : ControllerBase
                 {
                     IssueCount = g.Count(),
                     StoryPoints = g.Sum(i => i.StoryPoints ?? 0),
-                    CompletedSP = g.Where(i => i.Status.IsTerminal).Sum(i => i.StoryPoints ?? 0),
+                    CompletedSP = g.Where(i => i.Status.IsDoneStatus).Sum(i => i.StoryPoints ?? 0),
                 });
 
         return sprints.Select(s =>
@@ -88,7 +88,7 @@ public class SprintsController(AppDbContext db) : ControllerBase
         return ToDto(sprint,
             issueStats.Count,
             issueStats.Sum(i => i.StoryPoints ?? 0),
-            issueStats.Where(i => i.Status.IsTerminal).Sum(i => i.StoryPoints ?? 0));
+            issueStats.Where(i => i.Status.IsDoneStatus).Sum(i => i.StoryPoints ?? 0));
     }
 
     // ── GET /api/v1/spaces/{spaceId}/sprints/velocity ────────────────────────
@@ -230,7 +230,7 @@ public class SprintsController(AppDbContext db) : ControllerBase
         var allIssues = sprint.Issues.Where(i => i.DeletedAt == null).ToList();
 
         // Separate done vs. incomplete issues
-        var incompleteIssues = allIssues.Where(i => !i.Status.IsTerminal).ToList();
+        var incompleteIssues = allIssues.Where(i => !i.Status.IsDoneStatus).ToList();
 
         if (req.Disposition == "next_sprint" && req.TargetSprintId.HasValue)
         {
@@ -249,7 +249,7 @@ public class SprintsController(AppDbContext db) : ControllerBase
 
         // Record velocity snapshot
         var committedSP  = allIssues.Sum(i => i.StoryPoints ?? 0);
-        var completedSP  = allIssues.Where(i => i.Status.IsTerminal).Sum(i => i.StoryPoints ?? 0);
+        var completedSP  = allIssues.Where(i => i.Status.IsDoneStatus).Sum(i => i.StoryPoints ?? 0);
 
         db.Set<SprintVelocityRecord>().Add(new SprintVelocityRecord
         {
@@ -322,8 +322,8 @@ public class SprintsController(AppDbContext db) : ControllerBase
 
     private void RequireManager(Space space)
     {
-        if (!User.HasOrgRole(space.OrgId, MemberRole.OrgTaskManager))
-            throw new UnauthorizedAccessException("Only Task Managers can perform this action.");
+        if (!User.HasOrgRole(space.OrgId, OrgRole.OrgManager))
+            throw new UnauthorizedAccessException("Only OrgManagers can perform this action.");
     }
 
     private static SprintDto ToDto(Sprint s, int issueCount, int sp, int completedSP) =>

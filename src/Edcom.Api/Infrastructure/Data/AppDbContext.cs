@@ -15,6 +15,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     // Spaces
     public DbSet<Space> Spaces => Set<Space>();
+    public DbSet<SpaceAssignment> SpaceAssignments => Set<SpaceAssignment>();
 
     // Workflow
     public DbSet<WorkflowStatus> WorkflowStatuses => Set<WorkflowStatus>();
@@ -25,9 +26,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<IssueAssignee> IssueAssignees => Set<IssueAssignee>();
     public DbSet<Sprint> Sprints => Set<Sprint>();
     public DbSet<Epic> Epics => Set<Epic>();
-
-    // Cross-org
-    public DbSet<CrossOrgTicket> CrossOrgTickets => Set<CrossOrgTicket>();
 
     // Time tracking
     public DbSet<Worklog> Worklogs => Set<Worklog>();
@@ -67,6 +65,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             e.HasKey(x => x.Id);
             e.HasIndex(x => x.Slug).IsUnique();
+            e.Property(x => x.Status).HasConversion<string>();
         });
 
         // ── OrgMember ───────────────────────────────────────────
@@ -87,13 +86,23 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         mb.Entity<Space>(e =>
         {
             e.HasKey(x => x.Id);
-            e.HasIndex(x => new { x.OrgId, x.Type }).IsUnique();
             e.HasIndex(x => x.IssueKeyPrefix).IsUnique();
-            e.Property(x => x.Type).HasConversion<string>();
-            e.Property(x => x.BoardTemplate).HasConversion<string>();
-            e.Property(x => x.Status).HasConversion<string>();
+            e.Property(x => x.BoardType).HasConversion<string>();
             e.HasOne(x => x.Organization).WithMany(o => o.Spaces)
                 .HasForeignKey(x => x.OrgId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ── SpaceAssignment ─────────────────────────────────────
+        mb.Entity<SpaceAssignment>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.SpaceId, x.UserId }).IsUnique();
+            e.HasOne(x => x.Space).WithMany(s => s.SpaceAssignments)
+                .HasForeignKey(x => x.SpaceId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.User).WithMany(u => u.SpaceAssignments)
+                .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.AssignedBy).WithMany()
+                .HasForeignKey(x => x.AssignedById).OnDelete(DeleteBehavior.Restrict);
         });
 
         // ── WorkflowStatus ──────────────────────────────────────
@@ -101,15 +110,17 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             e.HasKey(x => x.Id);
             e.HasOne(x => x.Space).WithMany(s => s.WorkflowStatuses)
-                .HasForeignKey(x => x.SpaceId).OnDelete(DeleteBehavior.Cascade).IsRequired(false);
+                .HasForeignKey(x => x.SpaceId).OnDelete(DeleteBehavior.Cascade);
         });
 
         // ── WorkflowTransition ──────────────────────────────────
         mb.Entity<WorkflowTransition>(e =>
         {
             e.HasKey(x => x.Id);
+            e.HasOne(x => x.Space).WithMany(s => s.WorkflowTransitions)
+                .HasForeignKey(x => x.SpaceId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne(x => x.FromStatus).WithMany(s => s.TransitionsFrom)
-                .HasForeignKey(x => x.FromStatusId).OnDelete(DeleteBehavior.Cascade);
+                .HasForeignKey(x => x.FromStatusId).OnDelete(DeleteBehavior.NoAction);
             e.HasOne(x => x.ToStatus).WithMany(s => s.TransitionsTo)
                 .HasForeignKey(x => x.ToStatusId).OnDelete(DeleteBehavior.NoAction);
         });
@@ -165,21 +176,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasForeignKey(x => x.IssueId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne(x => x.User).WithMany()
                 .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
-        });
-
-        // ── CrossOrgTicket ──────────────────────────────────────
-        mb.Entity<CrossOrgTicket>(e =>
-        {
-            e.HasKey(x => x.Id);
-            e.HasIndex(x => x.ExternalIssueId).IsUnique();
-            e.HasOne(x => x.ExternalIssue).WithOne(i => i.CrossOrgTicketAsExternal)
-                .HasForeignKey<CrossOrgTicket>(x => x.ExternalIssueId).OnDelete(DeleteBehavior.Restrict);
-            e.HasOne(x => x.InternalMirrorIssue).WithOne(i => i.CrossOrgTicketAsMirror)
-                .HasForeignKey<CrossOrgTicket>(x => x.InternalMirrorIssueId).OnDelete(DeleteBehavior.Restrict).IsRequired(false);
-            e.HasOne(x => x.CreatorOrg).WithMany()
-                .HasForeignKey(x => x.CreatorOrgId).OnDelete(DeleteBehavior.Restrict);
-            e.HasOne(x => x.ReceiverOrg).WithMany()
-                .HasForeignKey(x => x.ReceiverOrgId).OnDelete(DeleteBehavior.Restrict);
         });
 
         // ── Comment ─────────────────────────────────────────────

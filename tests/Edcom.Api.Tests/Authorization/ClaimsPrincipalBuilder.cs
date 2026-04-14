@@ -22,9 +22,9 @@ internal sealed class ClaimsPrincipalBuilder
 
     public ClaimsPrincipalBuilder AsSystemAdmin() { _isAdmin = true; return this; }
 
-    public ClaimsPrincipalBuilder WithOrgRole(Guid orgId, MemberRole role, string orgName = "Test Org")
+    public ClaimsPrincipalBuilder WithOrgRole(Guid orgId, OrgRole role, string orgSlug = "test-org")
     {
-        _orgRoles.Add(new OrgRoleClaim(orgId, orgName, role.ToString()));
+        _orgRoles.Add(new OrgRoleClaim(orgId, orgSlug, role.ToString()));
         return this;
     }
 

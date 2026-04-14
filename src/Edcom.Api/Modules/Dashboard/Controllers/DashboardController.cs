@@ -11,13 +11,13 @@ namespace Edcom.Api.Modules.Dashboard.Controllers;
 /// GET /api/v1/dashboard
 ///
 /// RBAC:
-///   SystemAdmin   → all-org statistics
-///   OrgTaskManager → own org stats + cross-org in-progress
-///   Employer       → my tasks + deadlines
-///   Viewer         → read-only board summaries
+///   SystemAdmin  → all-org statistics
+///   OrgManager   → own org stats
+///   SpaceManager → assigned spaces overview
+///   Employer     → my tasks + deadlines
 /// </summary>
 [ApiController]
-[Route("api/v1/dashboard")]
+[Route("api/dashboard")]
 [Authorize]
 public class DashboardController(AppDbContext db, IPermissionService perms) : ControllerBase
 {
@@ -28,11 +28,11 @@ public class DashboardController(AppDbContext db, IPermissionService perms) : Co
 
         return view switch
         {
-            DashboardView.SystemWide  => Ok(await BuildSystemWideDashboard(ct)),
-            DashboardView.OrgManager  => Ok(await BuildOrgManagerDashboard(ct)),
-            DashboardView.MyTasks     => Ok(await BuildMyTasksDashboard(ct)),
-            DashboardView.ReadOnly    => Ok(await BuildReadOnlyDashboard(ct)),
-            _                         => Forbid()
+            DashboardView.SystemWide   => Ok(await BuildSystemWideDashboard(ct)),
+            DashboardView.OrgManager   => Ok(await BuildOrgManagerDashboard(ct)),
+            DashboardView.SpaceManager => Ok(await BuildSpaceManagerDashboard(ct)),
+            DashboardView.MyTasks      => Ok(await BuildMyTasksDashboard(ct)),
+            _                          => Forbid()
         };
     }
 
@@ -43,7 +43,7 @@ public class DashboardController(AppDbContext db, IPermissionService perms) : Co
         var totalUsers  = await db.Users.CountAsync(u => u.IsActive, ct);
         var totalIssues = await db.Issues.CountAsync(i => i.DeletedAt == null, ct);
         var openIssues  = await db.Issues
-            .CountAsync(i => i.DeletedAt == null && !i.Status.IsTerminal, ct);
+            .CountAsync(i => i.DeletedAt == null && !i.Status.IsDoneStatus, ct);
 
         return new
         {
@@ -52,10 +52,9 @@ public class DashboardController(AppDbContext db, IPermissionService perms) : Co
         };
     }
 
-    // ── OrgTaskManager: own org(s) + cross-org in-progress ───────────────────
+    // ── OrgManager: own org stats ─────────────────────────────────────────────
     private async Task<object> BuildOrgManagerDashboard(CancellationToken ct)
     {
-        var userId   = User.GetUserId();
         var myOrgIds = User.GetOrgRoles().Select(r => r.OrgId).ToList();
 
         var orgStats = await db.Organizations
@@ -65,25 +64,38 @@ public class DashboardController(AppDbContext db, IPermissionService perms) : Co
                 o.Id,
                 o.Name,
                 memberCount = o.Members.Count,
+                spaceCount  = o.Spaces.Count,
                 openIssues  = o.Spaces
                     .SelectMany(s => s.Issues)
-                    .Count(i => i.DeletedAt == null && !i.Status.IsTerminal)
+                    .Count(i => i.DeletedAt == null && !i.Status.IsDoneStatus)
             })
             .ToListAsync(ct);
-
-        var crossOrgInProgress = await db.CrossOrgTickets
-            .Include(t => t.ExternalIssue).ThenInclude(i => i.Status)
-            .Where(t => myOrgIds.Contains(t.CreatorOrgId) &&
-                        !t.ExternalIssue.Status.IsTerminal &&
-                        t.ExternalIssue.DeletedAt == null)
-            .CountAsync(ct);
 
         return new
         {
             view = "org_manager",
-            orgStats,
-            crossOrgInProgress
+            orgStats
         };
+    }
+
+    // ── SpaceManager: assigned spaces overview ────────────────────────────────
+    private async Task<object> BuildSpaceManagerDashboard(CancellationToken ct)
+    {
+        var mySpaceIds = User.GetSpaceRoles().Select(r => r.SpaceId).ToList();
+
+        var spaceSummaries = await db.Spaces
+            .Where(s => mySpaceIds.Contains(s.Id))
+            .Select(s => new
+            {
+                s.Id,
+                s.Name,
+                s.BoardType,
+                openIssues = s.Issues.Count(i => i.DeletedAt == null && !i.Status.IsDoneStatus),
+                totalIssues = s.Issues.Count(i => i.DeletedAt == null)
+            })
+            .ToListAsync(ct);
+
+        return new { view = "space_manager", spaces = spaceSummaries };
     }
 
     // ── Employer: my tasks + deadlines ────────────────────────────────────────
@@ -96,7 +108,7 @@ public class DashboardController(AppDbContext db, IPermissionService perms) : Co
             .Include(a => a.Issue).ThenInclude(i => i.Space)
             .Where(a => a.UserId == userId &&
                         a.Issue.DeletedAt == null &&
-                        !a.Issue.Status.IsTerminal)
+                        !a.Issue.Status.IsDoneStatus)
             .OrderBy(a => a.Issue.DueDate)
             .Select(a => new
             {
@@ -110,24 +122,5 @@ public class DashboardController(AppDbContext db, IPermissionService perms) : Co
             .ToListAsync(ct);
 
         return new { view = "my_tasks", issues = myIssues };
-    }
-
-    // ── Viewer: read-only board summaries ─────────────────────────────────────
-    private async Task<object> BuildReadOnlyDashboard(CancellationToken ct)
-    {
-        var myOrgIds = User.GetOrgRoles().Select(r => r.OrgId).ToList();
-
-        var summaries = await db.Spaces
-            .Where(s => myOrgIds.Contains(s.OrgId))
-            .Select(s => new
-            {
-                s.Id,
-                s.Name,
-                s.Type,
-                issueCount = s.Issues.Count(i => i.DeletedAt == null)
-            })
-            .ToListAsync(ct);
-
-        return new { view = "read_only", spaces = summaries };
     }
 }

@@ -9,7 +9,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Edcom.Api.Modules.Epics.Controllers;
 
 [ApiController]
-[Route("api/v1/spaces/{spaceId:guid}/epics")]
+[Route("api/spaces/{spaceId:guid}/epics")]
 [Authorize]
 public class EpicsController(AppDbContext db) : ControllerBase
 {
@@ -49,9 +49,9 @@ public class EpicsController(AppDbContext db) : ControllerBase
                 g => new
                 {
                     IssueCount          = g.Count(),
-                    CompletedIssueCount = g.Count(i => i.Status.IsTerminal),
+                    CompletedIssueCount = g.Count(i => i.Status.IsDoneStatus),
                     StoryPoints         = g.Sum(i => i.StoryPoints ?? 0),
-                    CompletedSP         = g.Where(i => i.Status.IsTerminal).Sum(i => i.StoryPoints ?? 0),
+                    CompletedSP         = g.Where(i => i.Status.IsDoneStatus).Sum(i => i.StoryPoints ?? 0),
                 });
 
         return epics.Select(e =>
@@ -157,7 +157,7 @@ public class EpicsController(AppDbContext db) : ControllerBase
 
     private void RequireManager(Space space)
     {
-        if (!User.HasOrgRole(space.OrgId, MemberRole.OrgTaskManager))
-            throw new UnauthorizedAccessException("Only Task Managers can perform this action.");
+        if (!User.HasOrgRole(space.OrgId, OrgRole.OrgManager))
+            throw new UnauthorizedAccessException("Only OrgManagers can perform this action.");
     }
 }

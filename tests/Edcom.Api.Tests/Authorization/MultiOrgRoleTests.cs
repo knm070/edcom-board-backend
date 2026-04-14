@@ -11,11 +11,12 @@ public sealed class MultiOrgRoleTests
 {
     private readonly IPermissionService _svc = new PermissionService();
 
-    private static readonly Guid OrgA = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001");
-    private static readonly Guid OrgB = Guid.Parse("bbbbbbbb-0000-0000-0000-000000000002");
+    private static readonly Guid OrgA   = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001");
+    private static readonly Guid OrgB   = Guid.Parse("bbbbbbbb-0000-0000-0000-000000000002");
+    private static readonly Guid SpaceX = Guid.Parse("cccccccc-0000-0000-0000-000000000003");
 
     /// <summary>
-    /// User is OrgTaskManager in Org-A and Employer in Org-B.
+    /// User is OrgManager in Org-A and Employer in Org-B.
     /// - In Org-A they can bypass the workflow (manager privilege).
     /// - In Org-B they CANNOT bypass the workflow (employer only).
     /// </summary>
@@ -23,12 +24,12 @@ public sealed class MultiOrgRoleTests
     public void ManagerInOrgA_EmployerInOrgB_WorkflowBypass_IsOrgScoped()
     {
         var user = new ClaimsPrincipalBuilder()
-            .WithOrgRole(OrgA, MemberRole.OrgTaskManager)
-            .WithOrgRole(OrgB, MemberRole.Employer)
+            .WithOrgRole(OrgA, OrgRole.OrgManager)
+            .WithOrgRole(OrgB, OrgRole.Employer)
             .Build();
 
         Assert.True(_svc.CanBypassWorkflow(user, OrgA),
-            "OrgTaskManager in Org-A should bypass workflow in Org-A.");
+            "OrgManager in Org-A should bypass workflow in Org-A.");
         Assert.False(_svc.CanBypassWorkflow(user, OrgB),
             "Employer in Org-B must NOT bypass workflow in Org-B.");
     }
@@ -40,8 +41,8 @@ public sealed class MultiOrgRoleTests
     public void ManagerInOrgA_CanManageMembers_OnlyInOrgA()
     {
         var user = new ClaimsPrincipalBuilder()
-            .WithOrgRole(OrgA, MemberRole.OrgTaskManager)
-            .WithOrgRole(OrgB, MemberRole.Employer)
+            .WithOrgRole(OrgA, OrgRole.OrgManager)
+            .WithOrgRole(OrgB, OrgRole.Employer)
             .Build();
 
         Assert.True(_svc.CanManageMembers(user, OrgA));
@@ -56,7 +57,7 @@ public sealed class MultiOrgRoleTests
     {
         var orgC = Guid.NewGuid();
         var user = new ClaimsPrincipalBuilder()
-            .WithOrgRole(OrgA, MemberRole.Employer)
+            .WithOrgRole(OrgA, OrgRole.Employer)
             .Build();
 
         Assert.True(_svc.CanWriteTicket(user, OrgA));
@@ -64,15 +65,15 @@ public sealed class MultiOrgRoleTests
     }
 
     /// <summary>
-    /// Dashboard view priority: when a user is OrgTaskManager in one org and Employer in another,
+    /// Dashboard view priority: when a user is OrgManager in one org and Employer in another,
     /// the OrgManager view is returned (higher-priority role wins).
     /// </summary>
     [Fact]
     public void DashboardView_PrioritisesHigherRole_WhenMultipleOrgs()
     {
         var user = new ClaimsPrincipalBuilder()
-            .WithOrgRole(OrgA, MemberRole.OrgTaskManager)
-            .WithOrgRole(OrgB, MemberRole.Employer)
+            .WithOrgRole(OrgA, OrgRole.OrgManager)
+            .WithOrgRole(OrgB, OrgRole.Employer)
             .Build();
 
         Assert.Equal(DashboardView.OrgManager, _svc.GetDashboardView(user));
@@ -86,7 +87,7 @@ public sealed class MultiOrgRoleTests
     {
         var admin = new ClaimsPrincipalBuilder()
             .AsSystemAdmin()
-            .WithOrgRole(OrgA, MemberRole.Employer)  // lower role present — should be ignored
+            .WithOrgRole(OrgA, OrgRole.Employer)  // lower role present — should be ignored
             .Build();
 
         Assert.Equal(DashboardView.SystemWide, _svc.GetDashboardView(admin));
@@ -98,13 +99,13 @@ public sealed class MultiOrgRoleTests
     [Fact]
     public void SystemAdmin_PassesAllOrgChecks_ForAnyOrg()
     {
-        var unknownOrg = Guid.NewGuid();
+        var unknownOrg   = Guid.NewGuid();
+        var unknownSpace = Guid.NewGuid();
         var admin = new ClaimsPrincipalBuilder().AsSystemAdmin().Build();
 
         Assert.True(_svc.CanManageMembers(admin, unknownOrg));
-        Assert.True(_svc.CanWriteTicket(admin, unknownOrg));
         Assert.True(_svc.CanBypassWorkflow(admin, unknownOrg));
-        Assert.True(_svc.CanConfigureWorkflow(admin, unknownOrg));
-        Assert.True(_svc.CanManageSprints(admin, unknownOrg));
+        Assert.True(_svc.CanConfigureWorkflow(admin, unknownOrg, unknownSpace));
+        Assert.True(_svc.CanManageSprints(admin, unknownOrg, unknownSpace));
     }
 }

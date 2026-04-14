@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace Edcom.Api.Modules.Identity.Controllers;
 
 [ApiController]
-[Route("api/v1/auth")]
+[Route("api/auth")]
 public class AuthController(IAuthService auth) : ControllerBase
 {
     [HttpPost("register")]

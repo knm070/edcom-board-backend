@@ -16,6 +16,7 @@ public class User
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     public ICollection<OrgMember> OrgMemberships { get; set; } = [];
+    public ICollection<SpaceAssignment> SpaceAssignments { get; set; } = [];
     public ICollection<RefreshToken> RefreshTokens { get; set; } = [];
     public ICollection<Issue> ReportedIssues { get; set; } = [];
 }

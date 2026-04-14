@@ -11,7 +11,10 @@ namespace Edcom.Api.Modules.Identity.Services;
 
 public interface ITokenService
 {
-    string GenerateAccessToken(User user, IEnumerable<OrgMember> memberships);
+    string GenerateAccessToken(
+        User user,
+        IEnumerable<OrgMember> memberships,
+        IEnumerable<SpaceAssignment> spaceAssignments);
     string GenerateRefreshToken();
     string HashToken(string token);
     ClaimsPrincipal? ValidateExpiredToken(string token);
@@ -34,41 +37,52 @@ public class TokenService(IConfiguration config) : ITokenService
     /// <summary>
     /// Generates a signed JWT containing:
     /// <list type="bullet">
-    ///   <item><c>sub</c>      — user ID</item>
+    ///   <item><c>sub</c>         — user ID</item>
     ///   <item><c>email</c></item>
     ///   <item><c>full_name</c></item>
-    ///   <item><c>is_admin</c> — "true" | "false"</item>
-    ///   <item><c>org_roles</c> — JSON array of { orgId, orgName, role } pairs</item>
+    ///   <item><c>is_admin</c>    — "true" | "false"</item>
+    ///   <item><c>org_roles</c>   — JSON array of { orgId, orgSlug, role }</item>
+    ///   <item><c>space_roles</c> — JSON array of { orgId, spaceId, spaceSlug } (SpaceManager entries only)</item>
     /// </list>
     /// </summary>
-    public string GenerateAccessToken(User user, IEnumerable<OrgMember> memberships)
+    public string GenerateAccessToken(
+        User user,
+        IEnumerable<OrgMember> memberships,
+        IEnumerable<SpaceAssignment> spaceAssignments)
     {
-        // Build org-role array: one entry per org the user belongs to
         var orgRoles = memberships
             .Select(m => new OrgRoleClaim(
                 m.OrgId,
-                m.Organization?.Name ?? string.Empty,
+                m.Organization?.Slug ?? string.Empty,
                 m.Role.ToString()))
+            .ToList();
+
+        var spaceRoles = spaceAssignments
+            .Select(sa => new SpaceRoleClaim(
+                sa.Space?.OrgId ?? Guid.Empty,
+                sa.SpaceId,
+                sa.Space?.Name ?? string.Empty))
             .ToList();
 
         var claims = new List<Claim>
         {
-            new(EdcomClaimTypes.UserId,   user.Id.ToString()),
-            new(EdcomClaimTypes.Email,    user.Email),
-            new(EdcomClaimTypes.FullName, user.FullName),
-            new(EdcomClaimTypes.IsAdmin,  user.IsSystemAdmin.ToString().ToLowerInvariant()),
-            new(EdcomClaimTypes.OrgRoles, JsonSerializer.Serialize(orgRoles, _jsonOpts)),
+            new(EdcomClaimTypes.UserId,     user.Id.ToString()),
+            new(EdcomClaimTypes.Email,      user.Email),
+            new(EdcomClaimTypes.FullName,   user.FullName),
+            new(EdcomClaimTypes.IsAdmin,    user.IsSystemAdmin.ToString().ToLowerInvariant()),
+            new(EdcomClaimTypes.OrgRoles,   JsonSerializer.Serialize(orgRoles,   _jsonOpts)),
+            new(EdcomClaimTypes.SpaceRoles, JsonSerializer.Serialize(spaceRoles, _jsonOpts)),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
         };
 
-        var key    = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_key));
-        var creds  = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+        var key   = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_key));
+        var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
         var token = new JwtSecurityToken(
-            issuer:            _issuer,
-            audience:          _audience,
-            claims:            claims,
-            expires:           DateTime.UtcNow.AddMinutes(_expiryMinutes),
+            issuer:             _issuer,
+            audience:           _audience,
+            claims:             claims,
+            expires:            DateTime.UtcNow.AddMinutes(_expiryMinutes),
             signingCredentials: creds);
 
         return new JwtSecurityTokenHandler().WriteToken(token);

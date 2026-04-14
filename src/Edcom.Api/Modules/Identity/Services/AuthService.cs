@@ -25,20 +25,21 @@ public class AuthService(AppDbContext db, ITokenService tokens, IConfiguration c
 
         var user = new User
         {
-            Email = req.Email.ToLower(),
-            FullName = req.FullName.Trim(),
+            Email        = req.Email.ToLower(),
+            FullName     = req.FullName.Trim(),
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(req.Password)
         };
 
         db.Users.Add(user);
         await db.SaveChangesAsync(ct);
-        return await IssueTokenPairAsync(user, [], ct);
+        return await IssueTokenPairAsync(user, [], [], ct);
     }
 
     public async Task<AuthResponse> LoginAsync(LoginRequest req, CancellationToken ct = default)
     {
         var user = await db.Users
             .Include(u => u.OrgMemberships).ThenInclude(m => m.Organization)
+            .Include(u => u.SpaceAssignments).ThenInclude(sa => sa.Space)
             .FirstOrDefaultAsync(u => u.Email == req.Email.ToLower(), ct)
             ?? throw new UnauthorizedAccessException("Invalid email or password.");
 
@@ -50,7 +51,7 @@ public class AuthService(AppDbContext db, ITokenService tokens, IConfiguration c
 
         user.LastLoginAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
-        return await IssueTokenPairAsync(user, user.OrgMemberships, ct);
+        return await IssueTokenPairAsync(user, user.OrgMemberships, user.SpaceAssignments, ct);
     }
 
     public async Task<AuthResponse> RefreshAsync(string refreshToken, CancellationToken ct = default)
@@ -58,15 +59,16 @@ public class AuthService(AppDbContext db, ITokenService tokens, IConfiguration c
         var hash = tokens.HashToken(refreshToken);
         var stored = await db.RefreshTokens
             .Include(rt => rt.User).ThenInclude(u => u.OrgMemberships).ThenInclude(m => m.Organization)
+            .Include(rt => rt.User).ThenInclude(u => u.SpaceAssignments).ThenInclude(sa => sa.Space)
             .FirstOrDefaultAsync(rt => rt.TokenHash == hash, ct)
             ?? throw new UnauthorizedAccessException("Refresh token not found.");
 
         if (!stored.IsActive)
             throw new UnauthorizedAccessException("Refresh token is expired or revoked.");
 
-        // Rotate: revoke old, issue new
         stored.RevokedAt = DateTime.UtcNow;
-        return await IssueTokenPairAsync(stored.User, stored.User.OrgMemberships, ct);
+        return await IssueTokenPairAsync(
+            stored.User, stored.User.OrgMemberships, stored.User.SpaceAssignments, ct);
     }
 
     public async Task RevokeAsync(string refreshToken, CancellationToken ct = default)
@@ -90,26 +92,30 @@ public class AuthService(AppDbContext db, ITokenService tokens, IConfiguration c
         return MapToDto(user, user.OrgMemberships);
     }
 
-    // ── Helpers ─────────────────────────────────────────────────────────────
+    // ── Helpers ──────────────────────────────────────────────────────────────
 
-    private async Task<AuthResponse> IssueTokenPairAsync(User user, IEnumerable<OrgMember> memberships, CancellationToken ct)
+    private async Task<AuthResponse> IssueTokenPairAsync(
+        User user,
+        IEnumerable<OrgMember> memberships,
+        IEnumerable<SpaceAssignment> spaceAssignments,
+        CancellationToken ct)
     {
-        var accessToken = tokens.GenerateAccessToken(user, memberships);
-        var rawRefresh = tokens.GenerateRefreshToken();
+        var accessToken = tokens.GenerateAccessToken(user, memberships, spaceAssignments);
+        var rawRefresh  = tokens.GenerateRefreshToken();
 
         db.RefreshTokens.Add(new RefreshToken
         {
-            UserId = user.Id,
+            UserId    = user.Id,
             TokenHash = tokens.HashToken(rawRefresh),
             ExpiresAt = DateTime.UtcNow.AddDays(_refreshDays)
         });
         await db.SaveChangesAsync(ct);
 
         return new AuthResponse(
-            User: MapToDto(user, memberships),
-            AccessToken: accessToken,
+            User:         MapToDto(user, memberships),
+            AccessToken:  accessToken,
             RefreshToken: rawRefresh,
-            ExpiresIn: int.Parse(config["Jwt:ExpiryMinutes"] ?? "60") * 60
+            ExpiresIn:    int.Parse(config["Jwt:ExpiryMinutes"] ?? "60") * 60
         );
     }
 
@@ -122,9 +128,9 @@ public class AuthService(AppDbContext db, ITokenService tokens, IConfiguration c
             user.IsSystemAdmin,
             memberships.Select(m => new OrgRoleDto(
                 m.OrgId,
-                m.Organization?.Name ?? "",
+                m.Organization?.Name ?? string.Empty,
+                m.Organization?.Slug ?? string.Empty,
                 m.Role.ToString(),
-                m.JoinedAt
-            ))
+                m.JoinedAt))
         );
 }

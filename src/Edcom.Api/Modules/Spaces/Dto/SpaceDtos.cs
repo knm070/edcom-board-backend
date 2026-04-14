@@ -6,9 +6,7 @@ public record SpaceDto(
     Guid Id,
     Guid OrgId,
     string Name,
-    string Type,           // "Internal" | "External"
-    string? BoardTemplate,
-    string Status,         // "Active" | "PendingTemplateSelection"
+    string BoardType,       // "Kanban" | "Scrum"
     string IssueKeyPrefix,
     int IssueCount,
     List<WorkflowStatusDto> Statuses,
@@ -21,7 +19,7 @@ public record WorkflowStatusDto(
     string Color,
     int Position,
     bool IsInitial,
-    bool IsTerminal
+    bool IsDoneStatus
 );
 
 public record WorkflowTransitionDto(
@@ -35,9 +33,13 @@ public record WorkflowTransitionDto(
 
 // ── Space requests ────────────────────────────────────────────────────────────
 
-public record UpdateSpaceRequest(string Name, string? BoardTemplate);
+public record CreateSpaceRequest(
+    string Name,
+    string BoardType,   // "Kanban" | "Scrum" — immutable after creation
+    string IssueKeyPrefix
+);
 
-public record SetInternalTemplateRequest(string BoardTemplate); // "Kanban" | "Scrum"
+public record UpdateSpaceRequest(string Name);
 
 // ── Workflow management requests ──────────────────────────────────────────────
 
@@ -54,5 +56,5 @@ public record ReorderStatusesRequest(List<Guid> OrderedStatusIds);
 public record AddTransitionRequest(
     Guid FromStatusId,
     Guid ToStatusId,
-    List<string>? AllowedRoles  // null = all roles; ["OrgTaskManager","Employer"]
+    List<string>? AllowedRoles  // null = all roles; ["OrgManager","Employer"]
 );

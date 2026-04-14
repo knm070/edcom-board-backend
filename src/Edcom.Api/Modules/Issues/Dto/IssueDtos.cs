@@ -92,3 +92,32 @@ public record CommentDto(
     Guid? ParentId,
     DateTime CreatedAt
 );
+
+public record WorklogDto(
+    Guid Id,
+    Guid IssueId,
+    Guid UserId,
+    string UserName,
+    string? UserAvatar,
+    decimal Hours,
+    string? Description,
+    DateTime Date,
+    DateTime CreatedAt
+);
+
+public record ActivityLogDto(
+    Guid Id,
+    Guid IssueId,
+    Guid ActorId,
+    string ActorName,
+    string? ActorAvatar,
+    string Action,
+    string? Metadata,
+    DateTime CreatedAt
+);
+
+public record UpdateWorklogRequest(
+    decimal? Hours,
+    string? Description,
+    DateTime? Date
+);
