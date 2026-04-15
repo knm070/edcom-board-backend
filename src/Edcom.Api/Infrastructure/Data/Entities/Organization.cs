@@ -12,6 +12,7 @@ public class Organization
     public OrgStatus Status { get; set; } = OrgStatus.Pending;
     public string? RejectionReason { get; set; }
     public bool IsActive { get; set; } = true;
+    public string BoardTypePreference { get; set; } = "Kanban";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 

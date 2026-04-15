@@ -191,6 +191,12 @@ if (app.Environment.IsDevelopment())
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.EnsureCreated();
 
+    // Inline column migrations for schema changes after initial creation
+    db.Database.ExecuteSqlRaw(@"
+        ALTER TABLE ""Organizations""
+        ADD COLUMN IF NOT EXISTS ""BoardTypePreference"" text NOT NULL DEFAULT 'Kanban';
+    ");
+
     const string adminEmail = "admin@edcom.dev";
     if (!db.Users.Any(u => u.Email == adminEmail))
     {

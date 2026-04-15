@@ -18,7 +18,7 @@ public class OrgsController(AppDbContext db, IPermissionService perms) : Control
 {
     private Guid CurrentUserId => User.GetUserId();
 
-    // ── GET /api/v1/orgs  ─────────────────────────────────────────────────────
+    // ── GET /api/orgs  ─────────────────────────────────────────────────────
     [HttpGet]
     public async Task<ActionResult<List<OrgDto>>> GetMyOrgs(CancellationToken ct)
     {
@@ -45,7 +45,7 @@ public class OrgsController(AppDbContext db, IPermissionService perms) : Control
         )).ToList();
     }
 
-    // ── POST /api/v1/orgs/request  ────────────────────────────────────────────
+    // ── POST /api/orgs/request  ────────────────────────────────────────────
     // Any authenticated user can request org creation.
     [HttpPost("request")]
     public async Task<ActionResult<OrgDto>> RequestCreate(
@@ -59,20 +59,30 @@ public class OrgsController(AppDbContext db, IPermissionService perms) : Control
 
         var org = new Organization
         {
-            Name        = req.Name,
-            Slug        = slug,
-            LogoUrl     = req.LogoUrl,
-            CreatedById = userId,
-            Status      = OrgStatus.Pending,
+            Name                = req.Name,
+            Slug                = slug,
+            LogoUrl             = req.LogoUrl,
+            CreatedById         = userId,
+            Status              = OrgStatus.Pending,
+            BoardTypePreference = req.BoardTypePreference ?? "Kanban",
         };
         db.Organizations.Add(org);
+
+        // Auto-attach the requesting user as OrgManager immediately
+        db.OrgMembers.Add(new OrgMember
+        {
+            OrgId  = org.Id,
+            UserId = userId,
+            Role   = OrgRole.OrgManager,
+        });
+
         await db.SaveChangesAsync(ct);
 
         return CreatedAtAction(nameof(GetById), new { orgId = org.Id }, new OrgDto(
             org.Id, org.Name, org.Slug, org.LogoUrl, string.Empty, 0, 0, org.CreatedAt));
     }
 
-    // ── GET /api/v1/orgs/{orgId}  ─────────────────────────────────────────────
+    // ── GET /api/orgs/{orgId}  ─────────────────────────────────────────────
     [HttpGet("{orgId:guid}")]
     public async Task<ActionResult<OrgDto>> GetById(Guid orgId, CancellationToken ct)
     {
@@ -90,6 +100,28 @@ public class OrgsController(AppDbContext db, IPermissionService perms) : Control
         var org = membership.Organization;
         return new OrgDto(org.Id, org.Name, org.Slug, org.LogoUrl, membership.Role.ToString(),
             org.Members.Count, org.Spaces.Count, org.CreatedAt);
+    }
+
+    // ── GET /api/orgs/my-requests  ────────────────────────────────────────────
+    // Returns all org creation requests submitted by the current user (any status).
+    [HttpGet("my-requests")]
+    public async Task<ActionResult<List<MyOrgRequestDto>>> GetMyRequests(CancellationToken ct)
+    {
+        var userId = CurrentUserId;
+        var requests = await db.Organizations
+            .Where(o => o.CreatedById == userId)
+            .OrderByDescending(o => o.CreatedAt)
+            .Select(o => new MyOrgRequestDto(
+                o.Id,
+                o.Name,
+                o.Slug,
+                o.LogoUrl,
+                o.Status.ToString(),
+                o.RejectionReason,
+                o.CreatedAt))
+            .ToListAsync(ct);
+
+        return requests;
     }
 
     // ── PATCH /api/v1/orgs/{orgId}  ───────────────────────────────────────────
@@ -126,6 +158,47 @@ public class OrgsController(AppDbContext db, IPermissionService perms) : Control
         return NoContent();
     }
 
+    // ── GET /api/orgs/admin/all  ──────────────────────────────────────────────
+    [HttpGet("admin/all")]
+    [Authorize(Policy = EdcomPolicies.SystemAdminOnly)]
+    public async Task<ActionResult<List<AdminOrgListDto>>> GetAllOrgs(CancellationToken ct)
+    {
+        var orgs = await db.Organizations
+            .Include(o => o.Members)
+            .Include(o => o.Spaces)
+                .ThenInclude(s => s.Issues.Where(i => i.DeletedAt == null))
+            .Where(o => o.IsActive && o.Status == OrgStatus.Active)
+            .OrderByDescending(o => o.CreatedAt)
+            .ToListAsync(ct);
+
+        return orgs.Select(o => new AdminOrgListDto(
+            o.Id, o.Name, o.Slug, o.LogoUrl,
+            o.Members.Count,
+            o.Spaces.Count,
+            o.Spaces.Sum(s => s.Issues.Count),
+            o.CreatedAt
+        )).ToList();
+    }
+
+    // ── GET /api/orgs/admin/requests  ─────────────────────────────────────────
+    [HttpGet("admin/requests")]
+    [Authorize(Policy = EdcomPolicies.SystemAdminOnly)]
+    public async Task<ActionResult<List<AdminOrgRequestListDto>>> GetAllRequests(CancellationToken ct)
+    {
+        var requests = await db.Organizations
+            .Include(o => o.CreatedBy)
+            .Where(o => o.IsActive)
+            .OrderByDescending(o => o.CreatedAt)
+            .ToListAsync(ct);
+
+        return requests.Select(o => new AdminOrgRequestListDto(
+            o.Id, o.Name, o.Slug, o.LogoUrl,
+            o.Status.ToString(), o.RejectionReason,
+            o.CreatedById, o.CreatedBy.FullName, o.CreatedBy.Email,
+            o.CreatedAt
+        )).ToList();
+    }
+
     // ── GET /api/v1/orgs/admin/pending  ───────────────────────────────────────
     [HttpGet("admin/pending")]
     [Authorize(Policy = EdcomPolicies.SystemAdminOnly)]
@@ -157,15 +230,40 @@ public class OrgsController(AppDbContext db, IPermissionService perms) : Control
         org.Status    = OrgStatus.Active;
         org.UpdatedAt = DateTime.UtcNow;
 
-        // Make the creator an OrgManager
+        // Ensure creator is an OrgManager (they are attached on request creation, but guard anyway)
         if (!await db.OrgMembers.AnyAsync(m => m.OrgId == orgId && m.UserId == org.CreatedById, ct))
         {
             db.OrgMembers.Add(new OrgMember
             {
-                OrgId   = orgId,
-                UserId  = org.CreatedById,
-                Role    = OrgRole.OrgManager,
+                OrgId  = orgId,
+                UserId = org.CreatedById,
+                Role   = OrgRole.OrgManager,
             });
+        }
+
+        // Auto-create the space with the preferred board type (if none exists yet)
+        if (!await db.Spaces.AnyAsync(s => s.OrgId == orgId, ct))
+        {
+            if (!Enum.TryParse<BoardType>(org.BoardTypePreference, out var boardType))
+                boardType = BoardType.Kanban;
+
+            var prefix = org.Slug.Length >= 3
+                ? org.Slug[..3].ToUpperInvariant()
+                : org.Slug.ToUpperInvariant();
+            var candidate = prefix;
+            var i = 0;
+            while (await db.Spaces.AnyAsync(s => s.OrgId == orgId && s.IssueKeyPrefix == candidate, ct))
+                candidate = $"{prefix}{++i}";
+
+            var space = new Space
+            {
+                OrgId          = orgId,
+                Name           = $"{org.Name} Board",
+                BoardType      = boardType,
+                IssueKeyPrefix = candidate,
+            };
+            db.Spaces.Add(space);
+            SeedDefaultWorkflow(space, boardType);
         }
 
         await db.SaveChangesAsync(ct);
@@ -281,4 +379,40 @@ public class OrgsController(AppDbContext db, IPermissionService perms) : Control
 
     private static string GenerateSlug(string name) =>
         Regex.Replace(name.ToLowerInvariant().Trim(), @"[^a-z0-9]+", "-").Trim('-');
+
+    private static void SeedDefaultWorkflow(Space space, BoardType boardType)
+    {
+        if (boardType == BoardType.Scrum)
+        {
+            var todo       = new WorkflowStatus { SpaceId = space.Id, Name = "To Do",       Color = "#6B7280", Position = 0, IsInitial = true };
+            var inProgress = new WorkflowStatus { SpaceId = space.Id, Name = "In Progress", Color = "#3B82F6", Position = 1 };
+            var inReview   = new WorkflowStatus { SpaceId = space.Id, Name = "In Review",   Color = "#F59E0B", Position = 2 };
+            var done       = new WorkflowStatus { SpaceId = space.Id, Name = "Done",        Color = "#10B981", Position = 3, IsDoneStatus = true };
+
+            space.WorkflowStatuses.Add(todo);
+            space.WorkflowStatuses.Add(inProgress);
+            space.WorkflowStatuses.Add(inReview);
+            space.WorkflowStatuses.Add(done);
+
+            space.WorkflowTransitions.Add(new WorkflowTransition { SpaceId = space.Id, FromStatus = todo,       ToStatus = inProgress });
+            space.WorkflowTransitions.Add(new WorkflowTransition { SpaceId = space.Id, FromStatus = inProgress, ToStatus = inReview   });
+            space.WorkflowTransitions.Add(new WorkflowTransition { SpaceId = space.Id, FromStatus = inReview,   ToStatus = done       });
+            space.WorkflowTransitions.Add(new WorkflowTransition { SpaceId = space.Id, FromStatus = inReview,   ToStatus = inProgress });
+            space.WorkflowTransitions.Add(new WorkflowTransition { SpaceId = space.Id, FromStatus = done,       ToStatus = inProgress });
+        }
+        else // Kanban
+        {
+            var todo       = new WorkflowStatus { SpaceId = space.Id, Name = "To Do",       Color = "#6B7280", Position = 0, IsInitial = true };
+            var inProgress = new WorkflowStatus { SpaceId = space.Id, Name = "In Progress", Color = "#3B82F6", Position = 1 };
+            var done       = new WorkflowStatus { SpaceId = space.Id, Name = "Done",        Color = "#10B981", Position = 2, IsDoneStatus = true };
+
+            space.WorkflowStatuses.Add(todo);
+            space.WorkflowStatuses.Add(inProgress);
+            space.WorkflowStatuses.Add(done);
+
+            space.WorkflowTransitions.Add(new WorkflowTransition { SpaceId = space.Id, FromStatus = todo,       ToStatus = inProgress });
+            space.WorkflowTransitions.Add(new WorkflowTransition { SpaceId = space.Id, FromStatus = inProgress, ToStatus = done       });
+            space.WorkflowTransitions.Add(new WorkflowTransition { SpaceId = space.Id, FromStatus = done,       ToStatus = inProgress });
+        }
+    }
 }
