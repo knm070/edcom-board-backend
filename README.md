@@ -1,1 +1,0 @@
-# edcom-board-backend
