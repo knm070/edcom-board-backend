@@ -35,6 +35,7 @@ public record SprintDto(
     DateTime? EndDate,
     string Status,
     int IssueCount,
+    int CompletedIssueCount,
     int StoryPoints,
     int CompletedStoryPoints,
     DateTime CreatedAt

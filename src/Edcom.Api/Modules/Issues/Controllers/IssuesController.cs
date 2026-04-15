@@ -397,15 +397,12 @@ public class IssuesController(AppDbContext db, IPermissionService perms, IWorkfl
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    /// <summary>
-    /// Loads the Space and verifies the caller is an org member using JWT claims only
-    /// (no extra DB round-trip required).
-    /// </summary>
     private async Task<Space> RequireSpaceMember(Guid spaceId, CancellationToken ct)
     {
         var space = await db.Spaces.FindAsync([spaceId], ct)
             ?? throw new KeyNotFoundException("Space not found.");
-        if (!User.IsMemberOfOrg(space.OrgId))
+        if (!User.IsSystemAdmin() &&
+            !await db.OrgMembers.AnyAsync(m => m.OrgId == space.OrgId && m.UserId == CurrentUserId, ct))
             throw new UnauthorizedAccessException("You are not a member of this organization.");
         return space;
     }

@@ -75,7 +75,7 @@ public class EpicsController(AppDbContext db) : ControllerBase
         Guid spaceId, [FromBody] CreateEpicRequest req, CancellationToken ct)
     {
         var space = await RequireSpaceMember(spaceId, ct);
-        RequireManager(space);
+        await RequireManagerAsync(space, ct);
 
         var epic = new Epic
         {
@@ -84,8 +84,8 @@ public class EpicsController(AppDbContext db) : ControllerBase
             Title       = req.Title,
             Description = req.Description,
             Color       = req.Color ?? "#6366F1",
-            StartDate   = req.StartDate,
-            EndDate     = req.EndDate,
+            StartDate   = ToUtc(req.StartDate),
+            EndDate     = ToUtc(req.EndDate),
             CreatedById = CurrentUserId,
         };
         db.Epics.Add(epic);
@@ -103,7 +103,7 @@ public class EpicsController(AppDbContext db) : ControllerBase
         [FromBody] UpdateEpicRequest req, CancellationToken ct)
     {
         var space = await RequireSpaceMember(spaceId, ct);
-        RequireManager(space);
+        await RequireManagerAsync(space, ct);
 
         var epic = await db.Epics.FindAsync([epicId], ct)
             ?? throw new KeyNotFoundException("Epic not found.");
@@ -112,8 +112,8 @@ public class EpicsController(AppDbContext db) : ControllerBase
         if (req.Title       != null) epic.Title       = req.Title;
         if (req.Description != null) epic.Description = req.Description;
         if (req.Color       != null) epic.Color       = req.Color;
-        if (req.StartDate   != null) epic.StartDate   = req.StartDate;
-        if (req.EndDate     != null) epic.EndDate     = req.EndDate;
+        if (req.StartDate   != null) epic.StartDate   = ToUtc(req.StartDate);
+        if (req.EndDate     != null) epic.EndDate     = ToUtc(req.EndDate);
         epic.UpdatedAt = DateTime.UtcNow;
 
         await db.SaveChangesAsync(ct);
@@ -128,7 +128,7 @@ public class EpicsController(AppDbContext db) : ControllerBase
         Guid spaceId, Guid epicId, CancellationToken ct)
     {
         var space = await RequireSpaceMember(spaceId, ct);
-        RequireManager(space);
+        await RequireManagerAsync(space, ct);
 
         var epic = await db.Epics.FindAsync([epicId], ct)
             ?? throw new KeyNotFoundException("Epic not found.");
@@ -146,18 +146,25 @@ public class EpicsController(AppDbContext db) : ControllerBase
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
+    private static DateTime? ToUtc(DateTime? dt) =>
+        dt.HasValue ? DateTime.SpecifyKind(dt.Value, DateTimeKind.Utc) : null;
+
     private async Task<Space> RequireSpaceMember(Guid spaceId, CancellationToken ct)
     {
         var space = await db.Spaces.FindAsync([spaceId], ct)
             ?? throw new KeyNotFoundException("Space not found.");
-        if (!User.IsMemberOfOrg(space.OrgId))
+        if (!User.IsSystemAdmin() &&
+            !await db.OrgMembers.AnyAsync(m => m.OrgId == space.OrgId && m.UserId == CurrentUserId, ct))
             throw new UnauthorizedAccessException("You are not a member of this organization.");
         return space;
     }
 
-    private void RequireManager(Space space)
+    private async Task RequireManagerAsync(Space space, CancellationToken ct)
     {
-        if (!User.HasOrgRole(space.OrgId, OrgRole.OrgManager))
-            throw new UnauthorizedAccessException("Only OrgManagers can perform this action.");
+        if (User.IsSystemAdmin()) return;
+        var member = await db.OrgMembers
+            .FirstOrDefaultAsync(m => m.OrgId == space.OrgId && m.UserId == CurrentUserId, ct);
+        if (member is null || (member.Role != OrgRole.OrgManager && member.Role != OrgRole.SpaceManager))
+            throw new UnauthorizedAccessException("Only OrgManagers or SpaceManagers can perform this action.");
     }
 }

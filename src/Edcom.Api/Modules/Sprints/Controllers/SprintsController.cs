@@ -48,9 +48,10 @@ public class SprintsController(AppDbContext db) : ControllerBase
                 g => g.Key,
                 g => new
                 {
-                    IssueCount = g.Count(),
-                    StoryPoints = g.Sum(i => i.StoryPoints ?? 0),
-                    CompletedSP = g.Where(i => i.Status.IsDoneStatus).Sum(i => i.StoryPoints ?? 0),
+                    IssueCount          = g.Count(),
+                    CompletedIssueCount = g.Count(i => i.Status.IsDoneStatus),
+                    StoryPoints         = g.Sum(i => i.StoryPoints ?? 0),
+                    CompletedSP         = g.Where(i => i.Status.IsDoneStatus).Sum(i => i.StoryPoints ?? 0),
                 });
 
         return sprints.Select(s =>
@@ -60,6 +61,7 @@ public class SprintsController(AppDbContext db) : ControllerBase
                 s.Id, s.SpaceId, s.Name, s.Goal, s.StartDate, s.EndDate,
                 s.Status.ToString(),
                 stats?.IssueCount ?? 0,
+                stats?.CompletedIssueCount ?? 0,
                 stats?.StoryPoints ?? 0,
                 stats?.CompletedSP ?? 0,
                 s.CreatedAt);
@@ -87,6 +89,7 @@ public class SprintsController(AppDbContext db) : ControllerBase
 
         return ToDto(sprint,
             issueStats.Count,
+            issueStats.Count(i => i.Status.IsDoneStatus),
             issueStats.Sum(i => i.StoryPoints ?? 0),
             issueStats.Where(i => i.Status.IsDoneStatus).Sum(i => i.StoryPoints ?? 0));
     }
@@ -118,22 +121,22 @@ public class SprintsController(AppDbContext db) : ControllerBase
         Guid spaceId, [FromBody] CreateSprintRequest req, CancellationToken ct)
     {
         var space = await RequireSpaceMember(spaceId, ct);
-        RequireManager(space);
+        await RequireManagerAsync(space, ct);
 
         var sprint = new Sprint
         {
             SpaceId   = spaceId,
             Name      = req.Name,
             Goal      = req.Goal,
-            StartDate = req.StartDate,
-            EndDate   = req.EndDate,
+            StartDate = ToUtc(req.StartDate),
+            EndDate   = ToUtc(req.EndDate),
             Status    = SprintStatus.Planned,
         };
         db.Sprints.Add(sprint);
         await db.SaveChangesAsync(ct);
 
         return CreatedAtAction(nameof(GetSprints), new { spaceId },
-            ToDto(sprint, 0, 0, 0));
+            ToDto(sprint, 0, 0, 0, 0));
     }
 
     // ── PATCH /api/v1/spaces/{spaceId}/sprints/{sprintId} ────────────────────
@@ -143,7 +146,7 @@ public class SprintsController(AppDbContext db) : ControllerBase
         [FromBody] UpdateSprintRequest req, CancellationToken ct)
     {
         var space = await RequireSpaceMember(spaceId, ct);
-        RequireManager(space);
+        await RequireManagerAsync(space, ct);
 
         var sprint = await db.Sprints.FindAsync([sprintId], ct)
             ?? throw new KeyNotFoundException("Sprint not found.");
@@ -151,12 +154,12 @@ public class SprintsController(AppDbContext db) : ControllerBase
 
         if (req.Name      != null) sprint.Name      = req.Name;
         if (req.Goal      != null) sprint.Goal      = req.Goal;
-        if (req.StartDate != null) sprint.StartDate = req.StartDate;
-        if (req.EndDate   != null) sprint.EndDate   = req.EndDate;
+        if (req.StartDate != null) sprint.StartDate = ToUtc(req.StartDate);
+        if (req.EndDate   != null) sprint.EndDate   = ToUtc(req.EndDate);
         sprint.UpdatedAt = DateTime.UtcNow;
 
         await db.SaveChangesAsync(ct);
-        return ToDto(sprint, 0, 0, 0); // stats not critical on update response
+        return ToDto(sprint, 0, 0, 0, 0); // stats not critical on update response
     }
 
     // ── DELETE /api/v1/spaces/{spaceId}/sprints/{sprintId} ───────────────────
@@ -165,7 +168,7 @@ public class SprintsController(AppDbContext db) : ControllerBase
         Guid spaceId, Guid sprintId, CancellationToken ct)
     {
         var space = await RequireSpaceMember(spaceId, ct);
-        RequireManager(space);
+        await RequireManagerAsync(space, ct);
 
         var sprint = await db.Sprints.FindAsync([sprintId], ct)
             ?? throw new KeyNotFoundException("Sprint not found.");
@@ -189,7 +192,7 @@ public class SprintsController(AppDbContext db) : ControllerBase
         Guid spaceId, Guid sprintId, CancellationToken ct)
     {
         var space = await RequireSpaceMember(spaceId, ct);
-        RequireManager(space);
+        await RequireManagerAsync(space, ct);
 
         var sprint = await db.Sprints.FindAsync([sprintId], ct)
             ?? throw new KeyNotFoundException("Sprint not found.");
@@ -207,7 +210,7 @@ public class SprintsController(AppDbContext db) : ControllerBase
         sprint.UpdatedAt = DateTime.UtcNow;
 
         await db.SaveChangesAsync(ct);
-        return ToDto(sprint, 0, 0, 0);
+        return ToDto(sprint, 0, 0, 0, 0);
     }
 
     // ── POST /api/v1/spaces/{spaceId}/sprints/{sprintId}/complete ────────────
@@ -217,7 +220,7 @@ public class SprintsController(AppDbContext db) : ControllerBase
         [FromBody] CompleteSprintRequest req, CancellationToken ct)
     {
         var space = await RequireSpaceMember(spaceId, ct);
-        RequireManager(space);
+        await RequireManagerAsync(space, ct);
 
         var sprint = await db.Sprints
             .Include(s => s.Issues).ThenInclude(i => i.Status)
@@ -265,7 +268,8 @@ public class SprintsController(AppDbContext db) : ControllerBase
         sprint.UpdatedAt = DateTime.UtcNow;
 
         await db.SaveChangesAsync(ct);
-        return ToDto(sprint, allIssues.Count, committedSP, completedSP);
+        var completedCount = allIssues.Count(i => i.Status.IsDoneStatus);
+        return ToDto(sprint, allIssues.Count, completedCount, committedSP, completedSP);
     }
 
     // ── POST /api/v1/spaces/{spaceId}/sprints/{sprintId}/issues ─────────────
@@ -315,18 +319,25 @@ public class SprintsController(AppDbContext db) : ControllerBase
     {
         var space = await db.Spaces.FindAsync([spaceId], ct)
             ?? throw new KeyNotFoundException("Space not found.");
-        if (!User.IsMemberOfOrg(space.OrgId))
+        if (!User.IsSystemAdmin() &&
+            !await db.OrgMembers.AnyAsync(m => m.OrgId == space.OrgId && m.UserId == CurrentUserId, ct))
             throw new UnauthorizedAccessException("You are not a member of this organization.");
         return space;
     }
 
-    private void RequireManager(Space space)
+    private async Task RequireManagerAsync(Space space, CancellationToken ct)
     {
-        if (!User.HasOrgRole(space.OrgId, OrgRole.OrgManager))
-            throw new UnauthorizedAccessException("Only OrgManagers can perform this action.");
+        if (User.IsSystemAdmin()) return;
+        var member = await db.OrgMembers
+            .FirstOrDefaultAsync(m => m.OrgId == space.OrgId && m.UserId == CurrentUserId, ct);
+        if (member is null || (member.Role != OrgRole.OrgManager && member.Role != OrgRole.SpaceManager))
+            throw new UnauthorizedAccessException("Only OrgManagers or SpaceManagers can perform this action.");
     }
 
-    private static SprintDto ToDto(Sprint s, int issueCount, int sp, int completedSP) =>
+    private static DateTime? ToUtc(DateTime? dt) =>
+        dt.HasValue ? DateTime.SpecifyKind(dt.Value, DateTimeKind.Utc) : null;
+
+    private static SprintDto ToDto(Sprint s, int issueCount, int completedIssueCount, int sp, int completedSP) =>
         new(s.Id, s.SpaceId, s.Name, s.Goal, s.StartDate, s.EndDate,
-            s.Status.ToString(), issueCount, sp, completedSP, s.CreatedAt);
+            s.Status.ToString(), issueCount, completedIssueCount, sp, completedSP, s.CreatedAt);
 }

@@ -1,5 +1,7 @@
 using Edcom.Api.Infrastructure.Data;
+using Edcom.Api.Infrastructure.Data.Entities;
 using Edcom.Api.Modules.Authorization.Extensions;
+using Edcom.Api.Modules.Authorization.Policies;
 using Edcom.Api.Modules.Authorization.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -34,6 +36,57 @@ public class DashboardController(AppDbContext db, IPermissionService perms) : Co
             DashboardView.MyTasks      => Ok(await BuildMyTasksDashboard(ct)),
             _                          => Forbid()
         };
+    }
+
+    // ── GET /api/dashboard/admin/stats  ──────────────────────────────────────
+    [HttpGet("admin/stats")]
+    [Authorize(Policy = EdcomPolicies.SystemAdminOnly)]
+    public async Task<IActionResult> GetAdminStats(CancellationToken ct)
+    {
+        // Users
+        var totalUsers  = await db.Users.CountAsync(ct);
+        var activeUsers = await db.Users.CountAsync(u => u.IsActive, ct);
+        var adminUsers  = await db.Users.CountAsync(u => u.IsSystemAdmin && u.IsActive, ct);
+
+        // Organizations
+        var totalOrgs    = await db.Organizations.CountAsync(o => o.IsActive && o.Status == OrgStatus.Active, ct);
+        var pendingOrgs  = await db.Organizations.CountAsync(o => o.IsActive && o.Status == OrgStatus.Pending, ct);
+        var rejectedOrgs = await db.Organizations.CountAsync(o => o.IsActive && o.Status == OrgStatus.Rejected, ct);
+
+        // Spaces
+        var totalSpaces  = await db.Spaces.CountAsync(ct);
+        var kanbanSpaces = await db.Spaces.CountAsync(s => s.BoardType == BoardType.Kanban, ct);
+        var scrumSpaces  = await db.Spaces.CountAsync(s => s.BoardType == BoardType.Scrum,  ct);
+
+        // Issues
+        var totalIssues    = await db.Issues.CountAsync(i => i.DeletedAt == null, ct);
+        var openIssues     = await db.Issues.CountAsync(i => i.DeletedAt == null && !i.Status.IsDoneStatus, ct);
+        var doneIssues     = await db.Issues.CountAsync(i => i.DeletedAt == null && i.Status.IsDoneStatus,  ct);
+        var criticalIssues = await db.Issues.CountAsync(i => i.DeletedAt == null && i.Priority == IssuePriority.Critical, ct);
+        var highIssues     = await db.Issues.CountAsync(i => i.DeletedAt == null && i.Priority == IssuePriority.High,     ct);
+        var bugIssues      = await db.Issues.CountAsync(i => i.DeletedAt == null && i.Type == IssueType.Bug, ct);
+
+        // Sprints
+        var totalSprints     = await db.Sprints.CountAsync(ct);
+        var activeSprints    = await db.Sprints.CountAsync(s => s.Status == SprintStatus.Active,    ct);
+        var completedSprints = await db.Sprints.CountAsync(s => s.Status == SprintStatus.Completed, ct);
+
+        // Epics
+        var totalEpics = await db.Epics.CountAsync(ct);
+
+        // Members
+        var totalMembers = await db.OrgMembers.CountAsync(ct);
+
+        return Ok(new
+        {
+            users  = new { totalUsers, activeUsers, adminUsers },
+            orgs   = new { totalOrgs, pendingOrgs, rejectedOrgs },
+            spaces = new { totalSpaces, kanbanSpaces, scrumSpaces },
+            issues = new { totalIssues, openIssues, doneIssues, criticalIssues, highIssues, bugIssues },
+            sprints = new { totalSprints, activeSprints, completedSprints },
+            epics   = new { totalEpics },
+            members = new { totalMembers },
+        });
     }
 
     // ── System Admin: all-org statistics ─────────────────────────────────────

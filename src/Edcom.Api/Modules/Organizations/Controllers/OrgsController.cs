@@ -3,7 +3,6 @@ using Edcom.Api.Infrastructure.Data;
 using Edcom.Api.Infrastructure.Data.Entities;
 using Edcom.Api.Modules.Authorization.Extensions;
 using Edcom.Api.Modules.Authorization.Policies;
-using Edcom.Api.Modules.Authorization.Services;
 using Edcom.Api.Modules.Organizations.Dto;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -14,7 +13,7 @@ namespace Edcom.Api.Modules.Organizations.Controllers;
 [ApiController]
 [Route("api/orgs")]
 [Authorize]
-public class OrgsController(AppDbContext db, IPermissionService perms) : ControllerBase
+public class OrgsController(AppDbContext db) : ControllerBase
 {
     private Guid CurrentUserId => User.GetUserId();
 
@@ -129,7 +128,7 @@ public class OrgsController(AppDbContext db, IPermissionService perms) : Control
     public async Task<ActionResult<OrgDto>> Update(
         Guid orgId, [FromBody] UpdateOrgRequest req, CancellationToken ct)
     {
-        RequirePermission(perms.CanManageMembers(User, orgId));
+        await RequireOrgManagerAsync(orgId, ct);
         var org = await db.Organizations.FindAsync([orgId], ct)
             ?? throw new KeyNotFoundException("Organization not found.");
 
@@ -252,7 +251,7 @@ public class OrgsController(AppDbContext db, IPermissionService perms) : Control
                 : org.Slug.ToUpperInvariant();
             var candidate = prefix;
             var i = 0;
-            while (await db.Spaces.AnyAsync(s => s.OrgId == orgId && s.IssueKeyPrefix == candidate, ct))
+            while (await db.Spaces.AnyAsync(s => s.IssueKeyPrefix == candidate, ct))
                 candidate = $"{prefix}{++i}";
 
             var space = new Space
@@ -294,7 +293,7 @@ public class OrgsController(AppDbContext db, IPermissionService perms) : Control
     [HttpGet("{orgId:guid}/members")]
     public async Task<ActionResult<List<OrgMemberDto>>> GetMembers(Guid orgId, CancellationToken ct)
     {
-        RequirePermission(perms.CanViewOrgMembers(User, orgId));
+        await RequireOrgMemberAsync(orgId, ct);
         return await db.OrgMembers
             .Include(m => m.User)
             .Where(m => m.OrgId == orgId)
@@ -310,7 +309,7 @@ public class OrgsController(AppDbContext db, IPermissionService perms) : Control
     public async Task<ActionResult<OrgMemberDto>> InviteMember(
         Guid orgId, [FromBody] InviteMemberRequest req, CancellationToken ct)
     {
-        RequirePermission(perms.CanManageMembers(User, orgId));
+        await RequireOrgManagerAsync(orgId, ct);
 
         var user = await db.Users.FirstOrDefaultAsync(u => u.Email == req.Email, ct)
             ?? throw new KeyNotFoundException("User not found. They must register first.");
@@ -340,7 +339,7 @@ public class OrgsController(AppDbContext db, IPermissionService perms) : Control
     public async Task<IActionResult> UpdateMemberRole(
         Guid orgId, Guid memberId, [FromBody] UpdateMemberRoleRequest req, CancellationToken ct)
     {
-        RequirePermission(perms.CanManageMembers(User, orgId));
+        await RequireOrgManagerAsync(orgId, ct);
 
         if (!Enum.TryParse<OrgRole>(req.Role, out var role))
             throw new InvalidOperationException("Invalid role.");
@@ -359,7 +358,7 @@ public class OrgsController(AppDbContext db, IPermissionService perms) : Control
     public async Task<IActionResult> RemoveMember(
         Guid orgId, Guid memberId, CancellationToken ct)
     {
-        RequirePermission(perms.CanManageMembers(User, orgId));
+        await RequireOrgManagerAsync(orgId, ct);
 
         var member = await db.OrgMembers
             .FirstOrDefaultAsync(m => m.OrgId == orgId && m.UserId == memberId, ct)
@@ -372,9 +371,20 @@ public class OrgsController(AppDbContext db, IPermissionService perms) : Control
 
     // ── Helpers  ──────────────────────────────────────────────────────────────
 
-    private void RequirePermission(bool allowed, string message = "You do not have permission to perform this action.")
+    private async Task RequireOrgMemberAsync(Guid orgId, CancellationToken ct)
     {
-        if (!allowed) throw new UnauthorizedAccessException(message);
+        if (User.IsSystemAdmin()) return;
+        if (!await db.OrgMembers.AnyAsync(m => m.OrgId == orgId && m.UserId == CurrentUserId, ct))
+            throw new UnauthorizedAccessException("You are not a member of this organization.");
+    }
+
+    private async Task RequireOrgManagerAsync(Guid orgId, CancellationToken ct)
+    {
+        if (User.IsSystemAdmin()) return;
+        var member = await db.OrgMembers
+            .FirstOrDefaultAsync(m => m.OrgId == orgId && m.UserId == CurrentUserId, ct);
+        if (member is null || member.Role != OrgRole.OrgManager)
+            throw new UnauthorizedAccessException("Only OrgManagers can perform this action.");
     }
 
     private static string GenerateSlug(string name) =>
