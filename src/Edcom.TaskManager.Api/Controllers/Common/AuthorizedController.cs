@@ -3,6 +3,9 @@ using System.Security.Claims;
 
 namespace Edcom.TaskManager.Api.Controllers.Common;
 
+/// <summary>
+/// Base controller for authorized controllers.
+/// </summary>
 [ApiController]
 [Authorize]
 public abstract class AuthorizedController : ControllerBase

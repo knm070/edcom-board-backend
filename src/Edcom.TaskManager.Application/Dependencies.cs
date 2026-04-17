@@ -1,3 +1,6 @@
+using Edcom.TaskManager.Application.Services.Auth;
+using Edcom.TaskManager.Application.Services.Organization;
+
 namespace Edcom.TaskManager.Application;
 
 public static class Dependencies
@@ -7,8 +10,8 @@ public static class Dependencies
         // Register validators from this assembly
         services.AddValidatorsFromAssemblyContaining(typeof(Dependencies));
 
-        // TODO: Register services here as you add them:
-        // services.AddScoped<IExampleService, ExampleService>();
+        services.AddScoped<IAuthService, AuthService>();
+        services.AddScoped<IOrganizationService, OrganizationService>();
 
         return services;
     }

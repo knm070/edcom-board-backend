@@ -1,8 +1,9 @@
 ﻿using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 
-namespace Compensation.Infrastructure.Authentication;
+namespace Edcom.TaskManager.Infrastructure.Authentication;
 
 public class JwtBearerOptionsSetup(IOptions<JwtOptions> options) : IPostConfigureOptions<JwtBearerOptions>
 {
@@ -20,5 +21,14 @@ public class JwtBearerOptionsSetup(IOptions<JwtOptions> options) : IPostConfigur
         options.TokenValidationParameters.ValidateLifetime = true;
         options.TokenValidationParameters.IssuerSigningKey =
             new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtOptions.SecretKey));
+        options.Events = new JwtBearerEvents
+        {
+            OnAuthenticationFailed = context =>
+            {
+                Console.WriteLine("TOKEN ERROR: " + context.Exception.Message);
+                return Task.CompletedTask;
+            }
+        };
+
     }
 }

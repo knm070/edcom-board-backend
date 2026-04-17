@@ -6,6 +6,7 @@ namespace Edcom.TaskManager.Api;
 
 public static class Dependencies
 {
+    
     public static IServiceCollection ConfigureControllers(this IServiceCollection services)
     {
         services.AddControllers(options =>
@@ -23,19 +24,21 @@ public static class Dependencies
         {
             options.SwaggerDoc("v1", new OpenApiInfo
             {
-                Title   = "Edcom TaskManager API",
+                Title = "Edcom TaskManager API",
                 Version = "v1",
             });
 
             options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
             {
-                Name         = "Authorization",
-                Type         = SecuritySchemeType.Http,
-                Scheme       = "bearer",
+                Name = "Authorization",
+                Type = SecuritySchemeType.Http,
+                Scheme = "bearer",
                 BearerFormat = "JWT",
-                In           = ParameterLocation.Header,
-                Description  = "Enter your JWT token.",
+                In = ParameterLocation.Header,
+                Description = "Enter your JWT token.",
             });
+
+            options.IncludeXmlComments(Path.Combine(AppContext.BaseDirectory, "Edcom.TaskManager.Api.xml"));
 
             options.AddSecurityRequirement(new OpenApiSecurityRequirement
             {

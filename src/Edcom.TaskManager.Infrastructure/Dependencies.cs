@@ -1,4 +1,5 @@
 using Edcom.TaskManager.Infrastructure.Authentication;
+using Edcom.TaskManager.Infrastructure.Helpers;
 using Edcom.TaskManager.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.Options;
@@ -17,6 +18,8 @@ public static class Dependencies
         services
             .ConfigureDbContext(configuration)
             .ConfigureJwt(configuration);
+
+        services.AddSingleton<PasswordHasher>();
 
         // TODO: Register brokers here:
         // services.AddScoped<IExampleBroker, ExampleBroker>();
@@ -53,22 +56,11 @@ public static class Dependencies
             .GetSection(JwtOptions.SectionName)
             .Get<JwtOptions>()!;
 
+        services.ConfigureOptions<JwtBearerOptionsSetup>();
+
         services
             .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-            .AddJwtBearer(options =>
-            {
-                options.TokenValidationParameters = new TokenValidationParameters
-                {
-                    ValidateIssuer           = true,
-                    ValidateAudience         = true,
-                    ValidateLifetime         = true,
-                    ValidateIssuerSigningKey = true,
-                    ValidIssuer              = jwtOptions.Issuer,
-                    ValidAudience            = jwtOptions.Audience,
-                    IssuerSigningKey         = new SymmetricSecurityKey(
-                        Encoding.UTF8.GetBytes(jwtOptions.SecretKey)),
-                };
-            });
+            .AddJwtBearer();
 
         return services;
     }
