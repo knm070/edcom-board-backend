@@ -7,6 +7,7 @@ using Edcom.TaskManager.Application.Services.Sprint;
 using Edcom.TaskManager.Application.Services.Tag;
 using Edcom.TaskManager.Application.Services.Ticket;
 using Edcom.TaskManager.Application.Services.TicketComment;
+using Edcom.TaskManager.Application.Services.User;
 using Edcom.TaskManager.Application.Services.WorkflowStatus;
 
 namespace Edcom.TaskManager.Application;
@@ -27,6 +28,7 @@ public static class Dependencies
         services.AddScoped<ITagService, TagService>();
         services.AddScoped<ITicketService, TicketService>();
         services.AddScoped<ITicketCommentService, TicketCommentService>();
+        services.AddScoped<IUserService, UserService>();
 
         return services;
     }
