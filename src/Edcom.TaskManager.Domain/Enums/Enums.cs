@@ -48,6 +48,7 @@ public enum WorkflowStatusBaseType
     InReview   = 2,
     Done       = 3,
     Custom     = 4,
+    Backlog    = 5,
 }
 
 public enum ActivityAction

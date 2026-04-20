@@ -107,6 +107,7 @@ public class SpaceService(AppDbContext dbContext) : ISpaceService
 
         space.WorkflowStatuses =
         [
+            new() { Name = "Backlog",     Color = "#64748b", Position = 0, BaseType = WorkflowStatusBaseType.Backlog },
             new() { Name = "To Do",       Color = "#94a3b8", Position = 1, BaseType = WorkflowStatusBaseType.ToDo },
             new() { Name = "In Progress", Color = "#3b82f6", Position = 2, BaseType = WorkflowStatusBaseType.InProgress },
             new() { Name = "Done",        Color = "#22c55e", Position = 3, BaseType = WorkflowStatusBaseType.Done },

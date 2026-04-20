@@ -1,4 +1,5 @@
 using Edcom.TaskManager.Application.Services.Ticket.Contracts;
+using Edcom.TaskManager.Domain.Enums;
 using Edcom.TaskManager.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using TicketEntity = Edcom.TaskManager.Domain.Entities.Ticket;
@@ -37,6 +38,7 @@ public class TicketService(AppDbContext dbContext) : ITicketService
         StatusId        = t.StatusId,
         StatusName      = t.Status?.Name,
         StatusColor     = t.Status?.Color,
+        StatusBaseType  = (int?)t.Status?.BaseType,
         SprintId        = t.SprintId,
         SprintName      = t.Sprint?.Name,
         EpicId          = t.EpicId,
@@ -127,6 +129,29 @@ public class TicketService(AppDbContext dbContext) : ITicketService
             StoryPoints     = request.StoryPoints,
         };
 
+        // Auto-sync SprintId with status type
+        if (request.StatusId.HasValue)
+        {
+            var statusBaseType = await dbContext.WorkflowStatuses
+                .AsNoTracking()
+                .Where(s => s.Id == request.StatusId.Value && !s.IsDeleted)
+                .Select(s => (WorkflowStatusBaseType?)s.BaseType)
+                .SingleOrDefaultAsync(ct);
+
+            if (statusBaseType == WorkflowStatusBaseType.Backlog)
+            {
+                ticket.SprintId = null;
+            }
+            else if (!request.SprintId.HasValue)
+            {
+                ticket.SprintId = await dbContext.Sprints
+                    .AsNoTracking()
+                    .Where(s => s.SpaceId == spaceId && s.Status == SprintStatus.Active && !s.IsDeleted)
+                    .Select(s => (long?)s.Id)
+                    .FirstOrDefaultAsync(ct);
+            }
+        }
+
         dbContext.Tickets.Add(ticket);
         await dbContext.SaveChangesAsync(ct);
 
@@ -154,7 +179,37 @@ public class TicketService(AppDbContext dbContext) : ITicketService
         ticket.Title           = request.Title;
         ticket.Description     = request.Description;
         ticket.StatusId        = request.StatusId;
-        ticket.SprintId        = request.SprintId;
+
+        // Auto-sync SprintId based on the new status type
+        if (request.StatusId.HasValue)
+        {
+            var statusBaseType = await dbContext.WorkflowStatuses
+                .AsNoTracking()
+                .Where(s => s.Id == request.StatusId.Value && !s.IsDeleted)
+                .Select(s => (WorkflowStatusBaseType?)s.BaseType)
+                .SingleOrDefaultAsync(ct);
+
+            if (statusBaseType == WorkflowStatusBaseType.Backlog)
+            {
+                // Moving to backlog status → remove from sprint
+                ticket.SprintId = null;
+            }
+            else if (ticket.SprintId == null)
+            {
+                // Moving from backlog to workflow → auto-assign to active sprint if available
+                ticket.SprintId = await dbContext.Sprints
+                    .AsNoTracking()
+                    .Where(s => s.SpaceId == ticket.SpaceId && s.Status == SprintStatus.Active && !s.IsDeleted)
+                    .Select(s => (long?)s.Id)
+                    .FirstOrDefaultAsync(ct);
+            }
+            // else: ticket already has a sprint — keep it
+        }
+        else
+        {
+            ticket.SprintId = request.SprintId;
+        }
+
         ticket.EpicId          = request.EpicId;
         ticket.AssigneeId      = request.AssigneeId;
         ticket.DueDate         = request.DueDate;
