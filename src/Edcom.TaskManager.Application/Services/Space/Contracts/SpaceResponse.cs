@@ -11,6 +11,7 @@ public class SpaceResponse
     public BoardType BoardType { get; set; }
     public string IssueKeyPrefix { get; set; } = string.Empty;
     public int IssueCounter { get; set; }
+    public int IssueCount   { get; set; }
     public bool IsActive { get; set; }
     public long CreatedByUserId { get; set; }
     public DateTime CreatedAt { get; set; }

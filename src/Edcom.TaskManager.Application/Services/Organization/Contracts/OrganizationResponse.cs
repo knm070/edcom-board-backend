@@ -11,4 +11,7 @@ public class OrganizationResponse
     public long      CreatedByUserId  { get; set; }
     public DateTime  CreatedAt        { get; set; }
     public DateTime? UpdatedAt        { get; set; }
+    public int       MemberCount      { get; set; }
+    public int       SpaceCount       { get; set; }
+    public int       IssueCount       { get; set; }
 }

@@ -8,6 +8,17 @@ namespace Edcom.TaskManager.Application.Services.Sprint;
 
 public class SprintService(AppDbContext dbContext) : ISprintService
 {
+    private async Task<bool> IsAuthorizedAsync(long orgId, long callerUserId, CancellationToken ct)
+    {
+        var isAdmin = await dbContext.Users.AsNoTracking()
+            .AnyAsync(u => u.Id == callerUserId && u.IsSystemAdmin && !u.IsDeleted, ct);
+        if (isAdmin) return true;
+
+        return await dbContext.OrgMembers.AsNoTracking()
+            .AnyAsync(m => m.OrganizationId == orgId && m.UserId == callerUserId
+                        && m.Role == OrgRole.OrgManager && !m.IsDeleted, ct);
+    }
+
     public async Task<Result<List<SprintResponse>>> GetAllBySpaceAsync(long spaceId, CancellationToken ct)
     {
         var items = await dbContext.Sprints
@@ -64,11 +75,8 @@ public class SprintService(AppDbContext dbContext) : ISprintService
             .SingleOrDefaultAsync(ct);
         if (space is null) return SprintErrors.NotFound;
 
-        var isManager = await dbContext.OrgMembers
-            .AsNoTracking()
-            .AnyAsync(m => m.OrganizationId == space.OrganizationId && m.UserId == callerUserId
-                        && m.Role == OrgRole.OrgManager && !m.IsDeleted, ct);
-        if (!isManager) return SprintErrors.Forbidden;
+        if (!await IsAuthorizedAsync(space.OrganizationId, callerUserId, ct))
+            return SprintErrors.Forbidden;
 
         dbContext.Sprints.Add(new SprintEntity
         {
@@ -96,11 +104,8 @@ public class SprintService(AppDbContext dbContext) : ISprintService
             .Select(s => new { s.OrganizationId })
             .SingleOrDefaultAsync(ct);
 
-        var isManager = space is not null && await dbContext.OrgMembers
-            .AsNoTracking()
-            .AnyAsync(m => m.OrganizationId == space.OrganizationId && m.UserId == callerUserId
-                        && m.Role == OrgRole.OrgManager && !m.IsDeleted, ct);
-        if (!isManager) return SprintErrors.Forbidden;
+        if (space is null || !await IsAuthorizedAsync(space.OrganizationId, callerUserId, ct))
+            return SprintErrors.Forbidden;
 
         sprint.Name      = request.Name;
         sprint.Goal      = request.Goal;
@@ -124,11 +129,8 @@ public class SprintService(AppDbContext dbContext) : ISprintService
             .Select(s => new { s.OrganizationId })
             .SingleOrDefaultAsync(ct);
 
-        var isManager = space is not null && await dbContext.OrgMembers
-            .AsNoTracking()
-            .AnyAsync(m => m.OrganizationId == space.OrganizationId && m.UserId == callerUserId
-                        && m.Role == OrgRole.OrgManager && !m.IsDeleted, ct);
-        if (!isManager) return SprintErrors.Forbidden;
+        if (space is null || !await IsAuthorizedAsync(space.OrganizationId, callerUserId, ct))
+            return SprintErrors.Forbidden;
 
         sprint.IsDeleted = true;
         await dbContext.SaveChangesAsync(ct);

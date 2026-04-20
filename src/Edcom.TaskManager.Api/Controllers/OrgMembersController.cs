@@ -12,7 +12,7 @@ public class OrgMembersController(IOrgMemberService orgMemberService) : Authoriz
     [HttpGet]
     public async Task<IResult> GetAllAsync(long orgId, CancellationToken ct = default)
     {
-        var result = await orgMemberService.GetAllByOrgAsync(orgId, ct);
+        var result = await orgMemberService.GetAllByOrgAsync(orgId, UserId, ct);
         return result.IsSuccess ? Results.Ok(result.Data) : result.ToProblemDetails();
     }
 
@@ -20,7 +20,7 @@ public class OrgMembersController(IOrgMemberService orgMemberService) : Authoriz
     [HttpGet("{id:long}")]
     public async Task<IResult> GetByIdAsync(long orgId, long id, CancellationToken ct = default)
     {
-        var result = await orgMemberService.GetByIdAsync(id, ct);
+        var result = await orgMemberService.GetByIdAsync(id, UserId, ct);
         return result.IsSuccess ? Results.Ok(result.Data) : result.ToProblemDetails();
     }
 

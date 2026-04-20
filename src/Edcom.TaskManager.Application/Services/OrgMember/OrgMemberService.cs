@@ -8,8 +8,10 @@ namespace Edcom.TaskManager.Application.Services.OrgMember;
 
 public class OrgMemberService(AppDbContext dbContext) : IOrgMemberService
 {
-    public async Task<Result<List<OrgMemberResponse>>> GetAllByOrgAsync(long orgId, CancellationToken ct)
+    public async Task<Result<List<OrgMemberResponse>>> GetAllByOrgAsync(long orgId, long callerUserId, CancellationToken ct)
     {
+        if (!await IsMemberAsync(orgId, callerUserId, ct)) return OrgMemberErrors.Forbidden;
+
         var items = await dbContext.OrgMembers
             .AsNoTracking()
             .Where(m => m.OrganizationId == orgId && !m.IsDeleted)
@@ -30,7 +32,7 @@ public class OrgMemberService(AppDbContext dbContext) : IOrgMemberService
         return items;
     }
 
-    public async Task<Result<OrgMemberResponse>> GetByIdAsync(long id, CancellationToken ct)
+    public async Task<Result<OrgMemberResponse>> GetByIdAsync(long id, long callerUserId, CancellationToken ct)
     {
         var member = await dbContext.OrgMembers
             .AsNoTracking()
@@ -49,16 +51,35 @@ public class OrgMemberService(AppDbContext dbContext) : IOrgMemberService
             })
             .SingleOrDefaultAsync(ct);
 
-        return member is null ? OrgMemberErrors.NotFound : member;
+        if (member is null) return OrgMemberErrors.NotFound;
+        if (!await IsMemberAsync(member.OrganizationId, callerUserId, ct)) return OrgMemberErrors.Forbidden;
+        return member;
+    }
+
+    private async Task<bool> IsMemberAsync(long orgId, long callerUserId, CancellationToken ct)
+    {
+        var isAdmin = await dbContext.Users.AsNoTracking()
+            .AnyAsync(u => u.Id == callerUserId && u.IsSystemAdmin && !u.IsDeleted, ct);
+        if (isAdmin) return true;
+
+        return await dbContext.OrgMembers.AsNoTracking()
+            .AnyAsync(m => m.OrganizationId == orgId && m.UserId == callerUserId && !m.IsDeleted, ct);
+    }
+
+    private async Task<bool> IsAuthorizedAsync(long orgId, long callerUserId, CancellationToken ct)
+    {
+        var isAdmin = await dbContext.Users.AsNoTracking()
+            .AnyAsync(u => u.Id == callerUserId && u.IsSystemAdmin && !u.IsDeleted, ct);
+        if (isAdmin) return true;
+
+        return await dbContext.OrgMembers.AsNoTracking()
+            .AnyAsync(m => m.OrganizationId == orgId && m.UserId == callerUserId
+                        && m.Role == OrgRole.OrgManager && !m.IsDeleted, ct);
     }
 
     public async Task<Result> AddAsync(long orgId, AddOrgMemberRequest request, long callerUserId, CancellationToken ct)
     {
-        var isManager = await dbContext.OrgMembers
-            .AsNoTracking()
-            .AnyAsync(m => m.OrganizationId == orgId && m.UserId == callerUserId
-                        && m.Role == OrgRole.OrgManager && !m.IsDeleted, ct);
-        if (!isManager) return OrgMemberErrors.Forbidden;
+        if (!await IsAuthorizedAsync(orgId, callerUserId, ct)) return OrgMemberErrors.Forbidden;
 
         var alreadyMember = await dbContext.OrgMembers
             .AsNoTracking()
@@ -82,11 +103,7 @@ public class OrgMemberService(AppDbContext dbContext) : IOrgMemberService
             .SingleOrDefaultAsync(m => m.Id == id && !m.IsDeleted, ct);
         if (member is null) return OrgMemberErrors.NotFound;
 
-        var isManager = await dbContext.OrgMembers
-            .AsNoTracking()
-            .AnyAsync(m => m.OrganizationId == member.OrganizationId && m.UserId == callerUserId
-                        && m.Role == OrgRole.OrgManager && !m.IsDeleted, ct);
-        if (!isManager) return OrgMemberErrors.Forbidden;
+        if (!await IsAuthorizedAsync(member.OrganizationId, callerUserId, ct)) return OrgMemberErrors.Forbidden;
 
         member.Role = request.Role;
         await dbContext.SaveChangesAsync(ct);
@@ -99,11 +116,7 @@ public class OrgMemberService(AppDbContext dbContext) : IOrgMemberService
             .SingleOrDefaultAsync(m => m.Id == id && !m.IsDeleted, ct);
         if (member is null) return OrgMemberErrors.NotFound;
 
-        var isManager = await dbContext.OrgMembers
-            .AsNoTracking()
-            .AnyAsync(m => m.OrganizationId == member.OrganizationId && m.UserId == callerUserId
-                        && m.Role == OrgRole.OrgManager && !m.IsDeleted, ct);
-        if (!isManager) return OrgMemberErrors.Forbidden;
+        if (!await IsAuthorizedAsync(member.OrganizationId, callerUserId, ct)) return OrgMemberErrors.Forbidden;
 
         member.IsDeleted = true;
         await dbContext.SaveChangesAsync(ct);

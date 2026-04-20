@@ -29,14 +29,29 @@ public class AuthService(
 
         var (accessToken, refreshToken) = await IssueTokensAsync(user.Id, user.Email, user.IsSystemAdmin, cancellationToken);
 
+        var memberships = await dbContext.OrgMembers
+            .AsNoTracking()
+            .Where(m => m.UserId == user.Id && !m.IsDeleted)
+            .Include(m => m.Organization)
+            .Select(m => new OrgMembershipDto
+            {
+                OrgId    = m.OrganizationId,
+                OrgName  = m.Organization.Name,
+                Role     = (int)m.Role,
+                JoinedAt = m.CreatedAt,
+            })
+            .ToListAsync(cancellationToken);
+
         return new LoginResponse
         {
-            AccessToken   = accessToken,
-            RefreshToken  = refreshToken,
-            UserId        = user.Id,
-            Email         = user.Email,
-            FullName      = user.FullName,
-            IsSystemAdmin = user.IsSystemAdmin,
+            AccessToken    = accessToken,
+            RefreshToken   = refreshToken,
+            UserId         = user.Id,
+            Email          = user.Email,
+            FullName       = user.FullName,
+            AvatarUrl      = user.AvatarUrl,
+            IsSystemAdmin  = user.IsSystemAdmin,
+            OrgMemberships = memberships,
         };
     }
 
@@ -57,7 +72,22 @@ public class AuthService(
             })
             .SingleOrDefaultAsync(cancellationToken);
 
-        return user is null ? AuthErrors.InvalidCredentials : user;
+        if (user is null) return AuthErrors.InvalidCredentials;
+
+        user.OrgMemberships = await dbContext.OrgMembers
+            .AsNoTracking()
+            .Where(m => m.UserId == userId && !m.IsDeleted)
+            .Include(m => m.Organization)
+            .Select(m => new OrgMembershipDto
+            {
+                OrgId    = m.OrganizationId,
+                OrgName  = m.Organization.Name,
+                Role     = (int)m.Role,
+                JoinedAt = m.CreatedAt,
+            })
+            .ToListAsync(cancellationToken);
+
+        return user;
     }
 
     public async Task<Result<RefreshTokenResponse>> RefreshTokenAsync(RefreshTokenRequest request, CancellationToken cancellationToken)

@@ -14,6 +14,7 @@ public class TicketResponse
     public string? Description { get; set; }
     public long? StatusId { get; set; }
     public string? StatusName { get; set; }
+    public string? StatusColor { get; set; }
     public long? SprintId { get; set; }
     public string? SprintName { get; set; }
     public long? EpicId { get; set; }

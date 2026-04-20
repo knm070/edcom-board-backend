@@ -8,6 +8,17 @@ namespace Edcom.TaskManager.Application.Services.Epic;
 
 public class EpicService(AppDbContext dbContext) : IEpicService
 {
+    private async Task<bool> IsAuthorizedAsync(long orgId, long callerUserId, CancellationToken ct)
+    {
+        var isAdmin = await dbContext.Users.AsNoTracking()
+            .AnyAsync(u => u.Id == callerUserId && u.IsSystemAdmin && !u.IsDeleted, ct);
+        if (isAdmin) return true;
+
+        return await dbContext.OrgMembers.AsNoTracking()
+            .AnyAsync(m => m.OrganizationId == orgId && m.UserId == callerUserId
+                        && m.Role == OrgRole.OrgManager && !m.IsDeleted, ct);
+    }
+
     public async Task<Result<List<EpicResponse>>> GetAllBySpaceAsync(long spaceId, CancellationToken ct)
     {
         var items = await dbContext.Epics
@@ -64,11 +75,8 @@ public class EpicService(AppDbContext dbContext) : IEpicService
             .SingleOrDefaultAsync(ct);
         if (space is null) return EpicErrors.NotFound;
 
-        var isManager = await dbContext.OrgMembers
-            .AsNoTracking()
-            .AnyAsync(m => m.OrganizationId == space.OrganizationId && m.UserId == callerUserId
-                        && m.Role == OrgRole.OrgManager && !m.IsDeleted, ct);
-        if (!isManager) return EpicErrors.Forbidden;
+        if (!await IsAuthorizedAsync(space.OrganizationId, callerUserId, ct))
+            return EpicErrors.Forbidden;
 
         dbContext.Epics.Add(new EpicEntity
         {
@@ -97,11 +105,8 @@ public class EpicService(AppDbContext dbContext) : IEpicService
             .Select(s => new { s.OrganizationId })
             .SingleOrDefaultAsync(ct);
 
-        var isManager = space is not null && await dbContext.OrgMembers
-            .AsNoTracking()
-            .AnyAsync(m => m.OrganizationId == space.OrganizationId && m.UserId == callerUserId
-                        && m.Role == OrgRole.OrgManager && !m.IsDeleted, ct);
-        if (!isManager) return EpicErrors.Forbidden;
+        if (space is null || !await IsAuthorizedAsync(space.OrganizationId, callerUserId, ct))
+            return EpicErrors.Forbidden;
 
         epic.Title       = request.Title;
         epic.Description = request.Description;
@@ -125,11 +130,8 @@ public class EpicService(AppDbContext dbContext) : IEpicService
             .Select(s => new { s.OrganizationId })
             .SingleOrDefaultAsync(ct);
 
-        var isManager = space is not null && await dbContext.OrgMembers
-            .AsNoTracking()
-            .AnyAsync(m => m.OrganizationId == space.OrganizationId && m.UserId == callerUserId
-                        && m.Role == OrgRole.OrgManager && !m.IsDeleted, ct);
-        if (!isManager) return EpicErrors.Forbidden;
+        if (space is null || !await IsAuthorizedAsync(space.OrganizationId, callerUserId, ct))
+            return EpicErrors.Forbidden;
 
         epic.IsDeleted = true;
         await dbContext.SaveChangesAsync(ct);

@@ -8,6 +8,22 @@ namespace Edcom.TaskManager.Application.Services.Ticket;
 
 public class TicketService(AppDbContext dbContext) : ITicketService
 {
+    private async Task<bool> IsMemberBySpaceAsync(long spaceId, long callerUserId, CancellationToken ct)
+    {
+        var isAdmin = await dbContext.Users.AsNoTracking()
+            .AnyAsync(u => u.Id == callerUserId && u.IsSystemAdmin && !u.IsDeleted, ct);
+        if (isAdmin) return true;
+
+        var orgId = await dbContext.Spaces.AsNoTracking()
+            .Where(s => s.Id == spaceId && !s.IsDeleted)
+            .Select(s => (long?)s.OrganizationId)
+            .FirstOrDefaultAsync(ct);
+        if (orgId is null) return false;
+
+        return await dbContext.OrgMembers.AsNoTracking()
+            .AnyAsync(m => m.OrganizationId == orgId && m.UserId == callerUserId && !m.IsDeleted, ct);
+    }
+
     private static TicketResponse MapTicket(Domain.Entities.Ticket t) => new()
     {
         Id              = t.Id,
@@ -20,6 +36,7 @@ public class TicketService(AppDbContext dbContext) : ITicketService
         Description     = t.Description,
         StatusId        = t.StatusId,
         StatusName      = t.Status?.Name,
+        StatusColor     = t.Status?.Color,
         SprintId        = t.SprintId,
         SprintName      = t.Sprint?.Name,
         EpicId          = t.EpicId,
@@ -37,8 +54,10 @@ public class TicketService(AppDbContext dbContext) : ITicketService
         UpdatedAt       = t.UpdatedAt,
     };
 
-    public async Task<Result<List<TicketResponse>>> GetAllBySpaceAsync(long spaceId, CancellationToken ct)
+    public async Task<Result<List<TicketResponse>>> GetAllBySpaceAsync(long spaceId, long callerUserId, CancellationToken ct)
     {
+        if (!await IsMemberBySpaceAsync(spaceId, callerUserId, ct)) return TicketErrors.Forbidden;
+
         var tickets = await dbContext.Tickets
             .AsNoTracking()
             .Where(t => t.SpaceId == spaceId && !t.IsDeleted)
@@ -54,7 +73,7 @@ public class TicketService(AppDbContext dbContext) : ITicketService
         return tickets.Select(MapTicket).ToList();
     }
 
-    public async Task<Result<TicketResponse>> GetByIdAsync(long id, CancellationToken ct)
+    public async Task<Result<TicketResponse>> GetByIdAsync(long id, long callerUserId, CancellationToken ct)
     {
         var ticket = await dbContext.Tickets
             .AsNoTracking()
@@ -67,7 +86,9 @@ public class TicketService(AppDbContext dbContext) : ITicketService
             .Include(t => t.TicketTags).ThenInclude(tt => tt.Tag)
             .SingleOrDefaultAsync(ct);
 
-        return ticket is null ? TicketErrors.NotFound : MapTicket(ticket);
+        if (ticket is null) return TicketErrors.NotFound;
+        if (!await IsMemberBySpaceAsync(ticket.SpaceId, callerUserId, ct)) return TicketErrors.Forbidden;
+        return MapTicket(ticket);
     }
 
     public async Task<Result<TicketResponse>> AddAsync(long spaceId, CreateTicketRequest request, long callerUserId, CancellationToken ct)
@@ -75,6 +96,8 @@ public class TicketService(AppDbContext dbContext) : ITicketService
         var space = await dbContext.Spaces
             .SingleOrDefaultAsync(s => s.Id == spaceId && !s.IsDeleted, ct);
         if (space is null) return TicketErrors.SpaceNotFound;
+
+        if (!await IsMemberBySpaceAsync(spaceId, callerUserId, ct)) return TicketErrors.Forbidden;
 
         space.IssueCounter++;
         var keyNumber = $"{space.IssueKeyPrefix}-{space.IssueCounter}";
@@ -115,15 +138,16 @@ public class TicketService(AppDbContext dbContext) : ITicketService
             await dbContext.SaveChangesAsync(ct);
         }
 
-        return await GetByIdAsync(ticket.Id, ct);
+        return await GetByIdAsync(ticket.Id, callerUserId, ct);
     }
 
-    public async Task<Result> UpdateAsync(long id, UpdateTicketRequest request, CancellationToken ct)
+    public async Task<Result> UpdateAsync(long id, UpdateTicketRequest request, long callerUserId, CancellationToken ct)
     {
         var ticket = await dbContext.Tickets
             .Include(t => t.TicketTags)
             .SingleOrDefaultAsync(t => t.Id == id && !t.IsDeleted, ct);
         if (ticket is null) return TicketErrors.NotFound;
+        if (!await IsMemberBySpaceAsync(ticket.SpaceId, callerUserId, ct)) return TicketErrors.Forbidden;
 
         ticket.Type            = request.Type;
         ticket.Priority        = request.Priority;
@@ -151,11 +175,12 @@ public class TicketService(AppDbContext dbContext) : ITicketService
         return Result.Success();
     }
 
-    public async Task<Result> DeleteAsync(long id, CancellationToken ct)
+    public async Task<Result> DeleteAsync(long id, long callerUserId, CancellationToken ct)
     {
         var ticket = await dbContext.Tickets
             .SingleOrDefaultAsync(t => t.Id == id && !t.IsDeleted, ct);
         if (ticket is null) return TicketErrors.NotFound;
+        if (!await IsMemberBySpaceAsync(ticket.SpaceId, callerUserId, ct)) return TicketErrors.Forbidden;
 
         ticket.IsDeleted = true;
         await dbContext.SaveChangesAsync(ct);

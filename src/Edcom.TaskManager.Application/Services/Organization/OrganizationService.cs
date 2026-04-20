@@ -7,11 +7,24 @@ namespace Edcom.TaskManager.Application.Services.Organization;
 
 public class OrganizationService(AppDbContext dbContext) : IOrganizationService
 {
-    public async Task<Result<List<OrganizationResponse>>> GetAllAsync(CancellationToken cancellationToken)
+    private async Task<bool> IsMemberAsync(long orgId, long callerUserId, CancellationToken ct)
     {
+        var isAdmin = await dbContext.Users.AsNoTracking()
+            .AnyAsync(u => u.Id == callerUserId && u.IsSystemAdmin && !u.IsDeleted, ct);
+        if (isAdmin) return true;
+
+        return await dbContext.OrgMembers.AsNoTracking()
+            .AnyAsync(m => m.OrganizationId == orgId && m.UserId == callerUserId && !m.IsDeleted, ct);
+    }
+
+    public async Task<Result<List<OrganizationResponse>>> GetAllAsync(long callerUserId, CancellationToken cancellationToken)
+    {
+        var isAdmin = await dbContext.Users.AsNoTracking()
+            .AnyAsync(u => u.Id == callerUserId && u.IsSystemAdmin && !u.IsDeleted, cancellationToken);
+
         var items = await dbContext.Organizations
             .AsNoTracking()
-            .Where(o => !o.IsDeleted)
+            .Where(o => !o.IsDeleted && (isAdmin || o.Members.Any(m => m.UserId == callerUserId && !m.IsDeleted)))
             .OrderBy(o => o.Name)
             .Select(o => new OrganizationResponse
             {
@@ -24,13 +37,16 @@ public class OrganizationService(AppDbContext dbContext) : IOrganizationService
                 CreatedByUserId = o.CreatedByUserId,
                 CreatedAt       = o.CreatedAt,
                 UpdatedAt       = o.UpdatedAt,
+                MemberCount     = o.Members.Count(m => !m.IsDeleted),
+                SpaceCount      = o.Spaces.Count(s => !s.IsDeleted),
+                IssueCount      = o.Spaces.Where(s => !s.IsDeleted).SelectMany(s => s.Tickets).Count(t => !t.IsDeleted),
             })
             .ToListAsync(cancellationToken);
 
         return items;
     }
 
-    public async Task<Result<OrganizationResponse>> GetByIdAsync(long id, CancellationToken cancellationToken)
+    public async Task<Result<OrganizationResponse>> GetByIdAsync(long id, long callerUserId, CancellationToken cancellationToken)
     {
         var org = await dbContext.Organizations
             .AsNoTracking()
@@ -46,13 +62,18 @@ public class OrganizationService(AppDbContext dbContext) : IOrganizationService
                 CreatedByUserId = o.CreatedByUserId,
                 CreatedAt       = o.CreatedAt,
                 UpdatedAt       = o.UpdatedAt,
+                MemberCount     = o.Members.Count(m => !m.IsDeleted),
+                SpaceCount      = o.Spaces.Count(s => !s.IsDeleted),
+                IssueCount      = o.Spaces.Where(s => !s.IsDeleted).SelectMany(s => s.Tickets).Count(t => !t.IsDeleted),
             })
             .SingleOrDefaultAsync(cancellationToken);
 
-        return org is null ? OrganizationErrors.NotFound : org;
+        if (org is null) return OrganizationErrors.NotFound;
+        if (!await IsMemberAsync(id, callerUserId, cancellationToken)) return OrganizationErrors.Forbidden;
+        return org;
     }
 
-    public async Task<Result> AddAsync(
+    public async Task<Result<OrganizationResponse>> AddAsync(
         CreateOrganizationRequest request,
         long createdByUserId,
         CancellationToken cancellationToken)
@@ -68,7 +89,6 @@ public class OrganizationService(AppDbContext dbContext) : IOrganizationService
         {
             Name            = request.Name,
             Slug            = request.Slug,
-            Description     = request.Description,
             LogoUrl         = request.LogoUrl,
             IsActive        = true,
             CreatedByUserId = createdByUserId,
@@ -77,7 +97,17 @@ public class OrganizationService(AppDbContext dbContext) : IOrganizationService
         dbContext.Organizations.Add(org);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return Result.Success();
+        return new OrganizationResponse
+        {
+            Id              = org.Id,
+            Name            = org.Name,
+            Slug            = org.Slug,
+            Description     = org.Description,
+            LogoUrl         = org.LogoUrl,
+            IsActive        = org.IsActive,
+            CreatedByUserId = org.CreatedByUserId,
+            CreatedAt       = org.CreatedAt,
+        };
     }
 
     public async Task<Result> UpdateAsync(

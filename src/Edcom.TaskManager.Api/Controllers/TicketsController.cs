@@ -12,15 +12,16 @@ public class TicketsController(ITicketService ticketService) : AuthorizedControl
     [HttpGet]
     public async Task<IResult> GetAllAsync(long spaceId, CancellationToken ct = default)
     {
-        var result = await ticketService.GetAllBySpaceAsync(spaceId, ct);
+        var result = await ticketService.GetAllBySpaceAsync(spaceId, UserId, ct);
         return result.IsSuccess ? Results.Ok(result.Data) : result.ToProblemDetails();
     }
 
     /// <summary>Get ticket by id.</summary>
     [HttpGet("{id:long}")]
-    public async Task<IResult> GetByIdAsync(long spaceId, long id, CancellationToken ct = default)
+    [HttpGet("/api/tickets/{id:long}")]
+    public async Task<IResult> GetByIdAsync(long id, long spaceId = 0, CancellationToken ct = default)
     {
-        var result = await ticketService.GetByIdAsync(id, ct);
+        var result = await ticketService.GetByIdAsync(id, UserId, ct);
         return result.IsSuccess ? Results.Ok(result.Data) : result.ToProblemDetails();
     }
 
@@ -36,7 +37,7 @@ public class TicketsController(ITicketService ticketService) : AuthorizedControl
     [HttpPut("{id:long}")]
     public async Task<IResult> UpdateAsync(long spaceId, long id, [FromBody] UpdateTicketRequest request, CancellationToken ct = default)
     {
-        var result = await ticketService.UpdateAsync(id, request, ct);
+        var result = await ticketService.UpdateAsync(id, request, UserId, ct);
         return result.IsSuccess ? Results.Ok() : result.ToProblemDetails();
     }
 
@@ -44,7 +45,7 @@ public class TicketsController(ITicketService ticketService) : AuthorizedControl
     [HttpDelete("{id:long}")]
     public async Task<IResult> DeleteAsync(long spaceId, long id, CancellationToken ct = default)
     {
-        var result = await ticketService.DeleteAsync(id, ct);
+        var result = await ticketService.DeleteAsync(id, UserId, ct);
         return result.IsSuccess ? Results.Ok() : result.ToProblemDetails();
     }
 }

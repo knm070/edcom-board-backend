@@ -12,7 +12,7 @@ public class SpacesController(ISpaceService spaceService) : AuthorizedController
     [HttpGet]
     public async Task<IResult> GetAllAsync(long orgId, CancellationToken ct = default)
     {
-        var result = await spaceService.GetAllByOrgAsync(orgId, ct);
+        var result = await spaceService.GetAllByOrgAsync(orgId, UserId, ct);
         return result.IsSuccess ? Results.Ok(result.Data) : result.ToProblemDetails();
     }
 
@@ -20,7 +20,7 @@ public class SpacesController(ISpaceService spaceService) : AuthorizedController
     [HttpGet("{id:long}")]
     public async Task<IResult> GetByIdAsync(long orgId, long id, CancellationToken ct = default)
     {
-        var result = await spaceService.GetByIdAsync(id, ct);
+        var result = await spaceService.GetByIdAsync(id, UserId, ct);
         return result.IsSuccess ? Results.Ok(result.Data) : result.ToProblemDetails();
     }
 

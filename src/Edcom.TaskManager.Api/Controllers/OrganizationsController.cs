@@ -14,7 +14,7 @@ public class OrganizationsController(IOrganizationService organizationService) :
     [HttpGet]
     public async Task<IResult> GetAllAsync(CancellationToken cancellationToken = default)
     {
-        var result = await organizationService.GetAllAsync(cancellationToken);
+        var result = await organizationService.GetAllAsync(UserId, cancellationToken);
         return result.IsSuccess ? Results.Ok(result.Data) : result.ToProblemDetails();
     }
 
@@ -24,7 +24,7 @@ public class OrganizationsController(IOrganizationService organizationService) :
     [HttpGet("{id:long}")]
     public async Task<IResult> GetByIdAsync(long id, CancellationToken cancellationToken = default)
     {
-        var result = await organizationService.GetByIdAsync(id, cancellationToken);
+        var result = await organizationService.GetByIdAsync(id, UserId, cancellationToken);
         return result.IsSuccess ? Results.Ok(result.Data) : result.ToProblemDetails();
     }
 
@@ -38,7 +38,7 @@ public class OrganizationsController(IOrganizationService organizationService) :
         CancellationToken cancellationToken = default)
     {
         var result = await organizationService.AddAsync(request, UserId, cancellationToken);
-        return result.IsSuccess ? Results.Ok() : result.ToProblemDetails();
+        return result.IsSuccess ? Results.Ok(result.Data) : result.ToProblemDetails();
     }
 
     /// <summary>
