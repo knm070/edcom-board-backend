@@ -39,12 +39,30 @@ public class UserService(AppDbContext dbContext, PasswordHasher passwordHasher) 
         };
     }
 
-    public async Task<Result<List<UserResponse>>> GetAllAsync(CancellationToken ct)
+    public async Task<Result<PagedList<UserResponse>>> GetAllAsync(UserFilterRequest filter, CancellationToken ct)
     {
-        var users = await dbContext.Users
+        var query = dbContext.Users
             .AsNoTracking()
-            .Where(u => !u.IsDeleted)
+            .Where(u => !u.IsDeleted);
+
+        if (!string.IsNullOrWhiteSpace(filter.Search))
+        {
+            var s = $"%{filter.Search}%";
+            query = query.Where(u => EF.Functions.ILike(u.FullName, s) || EF.Functions.ILike(u.Email, s));
+        }
+
+        if (filter.IsSystemAdmin.HasValue)
+            query = query.Where(u => u.IsSystemAdmin == filter.IsSystemAdmin.Value);
+
+        if (filter.IsActive.HasValue)
+            query = query.Where(u => u.IsActive == filter.IsActive.Value);
+
+        var total = await query.CountAsync(ct);
+
+        var items = await query
             .OrderBy(u => u.FullName)
+            .Skip((filter.Page - 1) * filter.PageSize)
+            .Take(filter.PageSize)
             .Select(u => new UserResponse
             {
                 Id            = u.Id,
@@ -58,7 +76,7 @@ public class UserService(AppDbContext dbContext, PasswordHasher passwordHasher) 
             })
             .ToListAsync(ct);
 
-        return users;
+        return new PagedList<UserResponse>(items, filter.Page, filter.PageSize, total);
     }
 
     public async Task<Result<UserResponse>> GetByIdAsync(long id, CancellationToken ct)

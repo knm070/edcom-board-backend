@@ -8,11 +8,11 @@ namespace Edcom.TaskManager.Api.Controllers;
 [Route("api/spaces/{spaceId:long}/sprints")]
 public class SprintsController(ISprintService sprintService) : AuthorizedController
 {
-    /// <summary>Get all sprints for a space.</summary>
+    /// <summary>Get all sprints for a space with pagination and search.</summary>
     [HttpGet]
-    public async Task<IResult> GetAllAsync(long spaceId, CancellationToken ct = default)
+    public async Task<IResult> GetAllAsync(long spaceId, [FromQuery] SprintFilterRequest filter, CancellationToken ct = default)
     {
-        var result = await sprintService.GetAllBySpaceAsync(spaceId, ct);
+        var result = await sprintService.GetAllBySpaceAsync(spaceId, filter, ct);
         return result.IsSuccess ? Results.Ok(result.Data) : result.ToProblemDetails();
     }
 

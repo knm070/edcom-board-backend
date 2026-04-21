@@ -8,11 +8,11 @@ namespace Edcom.TaskManager.Api.Controllers;
 [Route("api/organizations/{orgId:long}/members")]
 public class OrgMembersController(IOrgMemberService orgMemberService) : AuthorizedController
 {
-    /// <summary>Get all members of an organization.</summary>
+    /// <summary>Get all members of an organization with pagination and search.</summary>
     [HttpGet]
-    public async Task<IResult> GetAllAsync(long orgId, CancellationToken ct = default)
+    public async Task<IResult> GetAllAsync(long orgId, [FromQuery] OrgMemberFilterRequest filter, CancellationToken ct = default)
     {
-        var result = await orgMemberService.GetAllByOrgAsync(orgId, UserId, ct);
+        var result = await orgMemberService.GetAllByOrgAsync(orgId, UserId, filter, ct);
         return result.IsSuccess ? Results.Ok(result.Data) : result.ToProblemDetails();
     }
 

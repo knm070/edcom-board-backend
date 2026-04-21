@@ -8,13 +8,11 @@ namespace Edcom.TaskManager.Api.Controllers;
 [Route("api/organizations")]
 public class OrganizationsController(IOrganizationService organizationService) : AuthorizedController
 {
-    /// <summary>
-    /// Get all organizations.
-    /// </summary>
+    /// <summary>Get all organizations with pagination and search.</summary>
     [HttpGet]
-    public async Task<IResult> GetAllAsync(CancellationToken cancellationToken = default)
+    public async Task<IResult> GetAllAsync([FromQuery] OrganizationFilterRequest filter, CancellationToken cancellationToken = default)
     {
-        var result = await organizationService.GetAllAsync(UserId, cancellationToken);
+        var result = await organizationService.GetAllAsync(UserId, filter, cancellationToken);
         return result.IsSuccess ? Results.Ok(result.Data) : result.ToProblemDetails();
     }
 

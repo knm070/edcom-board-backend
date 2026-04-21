@@ -8,13 +8,29 @@ namespace Edcom.TaskManager.Application.Services.OrgMember;
 
 public class OrgMemberService(AppDbContext dbContext) : IOrgMemberService
 {
-    public async Task<Result<List<OrgMemberResponse>>> GetAllByOrgAsync(long orgId, long callerUserId, CancellationToken ct)
+    public async Task<Result<PagedList<OrgMemberResponse>>> GetAllByOrgAsync(long orgId, long callerUserId, OrgMemberFilterRequest filter, CancellationToken ct)
     {
         if (!await IsMemberAsync(orgId, callerUserId, ct)) return OrgMemberErrors.Forbidden;
 
-        var items = await dbContext.OrgMembers
+        var query = dbContext.OrgMembers
             .AsNoTracking()
-            .Where(m => m.OrganizationId == orgId && !m.IsDeleted)
+            .Where(m => m.OrganizationId == orgId && !m.IsDeleted);
+
+        if (!string.IsNullOrWhiteSpace(filter.Search))
+        {
+            var s = $"%{filter.Search}%";
+            query = query.Where(m => EF.Functions.ILike(m.User.FullName, s) || EF.Functions.ILike(m.User.Email, s));
+        }
+
+        if (filter.Role.HasValue)
+            query = query.Where(m => m.Role == filter.Role.Value);
+
+        var total = await query.CountAsync(ct);
+
+        var items = await query
+            .OrderBy(m => m.User.FullName)
+            .Skip((filter.Page - 1) * filter.PageSize)
+            .Take(filter.PageSize)
             .Select(m => new OrgMemberResponse
             {
                 Id             = m.Id,
@@ -29,7 +45,7 @@ public class OrgMemberService(AppDbContext dbContext) : IOrgMemberService
             })
             .ToListAsync(ct);
 
-        return items;
+        return new PagedList<OrgMemberResponse>(items, filter.Page, filter.PageSize, total);
     }
 
     public async Task<Result<OrgMemberResponse>> GetByIdAsync(long id, long callerUserId, CancellationToken ct)

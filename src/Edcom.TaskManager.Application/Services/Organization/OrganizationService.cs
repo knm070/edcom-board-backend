@@ -17,15 +17,30 @@ public class OrganizationService(AppDbContext dbContext) : IOrganizationService
             .AnyAsync(m => m.OrganizationId == orgId && m.UserId == callerUserId && !m.IsDeleted, ct);
     }
 
-    public async Task<Result<List<OrganizationResponse>>> GetAllAsync(long callerUserId, CancellationToken cancellationToken)
+    public async Task<Result<PagedList<OrganizationResponse>>> GetAllAsync(long callerUserId, OrganizationFilterRequest filter, CancellationToken cancellationToken)
     {
         var isAdmin = await dbContext.Users.AsNoTracking()
             .AnyAsync(u => u.Id == callerUserId && u.IsSystemAdmin && !u.IsDeleted, cancellationToken);
 
-        var items = await dbContext.Organizations
+        var query = dbContext.Organizations
             .AsNoTracking()
-            .Where(o => !o.IsDeleted && (isAdmin || o.Members.Any(m => m.UserId == callerUserId && !m.IsDeleted)))
+            .Where(o => !o.IsDeleted && (isAdmin || o.Members.Any(m => m.UserId == callerUserId && !m.IsDeleted)));
+
+        if (!string.IsNullOrWhiteSpace(filter.Search))
+        {
+            var s = $"%{filter.Search}%";
+            query = query.Where(o => EF.Functions.ILike(o.Name, s) || EF.Functions.ILike(o.Slug, s));
+        }
+
+        if (filter.IsActive.HasValue)
+            query = query.Where(o => o.IsActive == filter.IsActive.Value);
+
+        var total = await query.CountAsync(cancellationToken);
+
+        var items = await query
             .OrderBy(o => o.Name)
+            .Skip((filter.Page - 1) * filter.PageSize)
+            .Take(filter.PageSize)
             .Select(o => new OrganizationResponse
             {
                 Id              = o.Id,
@@ -43,7 +58,7 @@ public class OrganizationService(AppDbContext dbContext) : IOrganizationService
             })
             .ToListAsync(cancellationToken);
 
-        return items;
+        return new PagedList<OrganizationResponse>(items, filter.Page, filter.PageSize, total);
     }
 
     public async Task<Result<OrganizationResponse>> GetByIdAsync(long id, long callerUserId, CancellationToken cancellationToken)

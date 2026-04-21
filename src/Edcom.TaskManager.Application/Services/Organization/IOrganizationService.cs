@@ -1,10 +1,11 @@
 using Edcom.TaskManager.Application.Services.Organization.Contracts;
+using Edcom.TaskManager.Domain.Abstractions;
 
 namespace Edcom.TaskManager.Application.Services.Organization;
 
 public interface IOrganizationService
 {
-    Task<Result<List<OrganizationResponse>>> GetAllAsync(long callerUserId, CancellationToken cancellationToken);
+    Task<Result<PagedList<OrganizationResponse>>> GetAllAsync(long callerUserId, OrganizationFilterRequest filter, CancellationToken cancellationToken);
 
     Task<Result<OrganizationResponse>> GetByIdAsync(long id, long callerUserId, CancellationToken cancellationToken);
 

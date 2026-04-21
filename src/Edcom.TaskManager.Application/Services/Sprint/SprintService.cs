@@ -19,28 +19,43 @@ public class SprintService(AppDbContext dbContext) : ISprintService
                         && m.Role == OrgRole.OrgManager && !m.IsDeleted, ct);
     }
 
-    public async Task<Result<List<SprintResponse>>> GetAllBySpaceAsync(long spaceId, CancellationToken ct)
+    public async Task<Result<PagedList<SprintResponse>>> GetAllBySpaceAsync(long spaceId, SprintFilterRequest filter, CancellationToken ct)
     {
-        var items = await dbContext.Sprints
+        var query = dbContext.Sprints
             .AsNoTracking()
-            .Where(s => s.SpaceId == spaceId && !s.IsDeleted)
-            .OrderByDescending(s => s.CreatedAt)
-            .Select(s => new SprintResponse
+            .Where(s => s.SpaceId == spaceId && !s.IsDeleted);
+
+        if (!string.IsNullOrWhiteSpace(filter.Search))
+        {
+            var s = $"%{filter.Search}%";
+            query = query.Where(x => EF.Functions.ILike(x.Name, s) || EF.Functions.ILike(x.Goal, s));
+        }
+
+        if (filter.Status.HasValue)
+            query = query.Where(x => x.Status == filter.Status.Value);
+
+        var total = await query.CountAsync(ct);
+
+        var items = await query
+            .OrderByDescending(x => x.CreatedAt)
+            .Skip((filter.Page - 1) * filter.PageSize)
+            .Take(filter.PageSize)
+            .Select(x => new SprintResponse
             {
-                Id              = s.Id,
-                SpaceId         = s.SpaceId,
-                Name            = s.Name,
-                Goal            = s.Goal,
-                StartDate       = s.StartDate,
-                EndDate         = s.EndDate,
-                Status          = s.Status,
-                CreatedByUserId = s.CreatedByUserId,
-                CreatedAt       = s.CreatedAt,
-                UpdatedAt       = s.UpdatedAt,
+                Id              = x.Id,
+                SpaceId         = x.SpaceId,
+                Name            = x.Name,
+                Goal            = x.Goal,
+                StartDate       = x.StartDate,
+                EndDate         = x.EndDate,
+                Status          = x.Status,
+                CreatedByUserId = x.CreatedByUserId,
+                CreatedAt       = x.CreatedAt,
+                UpdatedAt       = x.UpdatedAt,
             })
             .ToListAsync(ct);
 
-        return items;
+        return new PagedList<SprintResponse>(items, filter.Page, filter.PageSize, total);
     }
 
     public async Task<Result<SprintResponse>> GetByIdAsync(long id, CancellationToken ct)

@@ -17,11 +17,11 @@ public class UsersController(IUserService userService) : AuthorizedController
         return result.IsSuccess ? Results.Ok(result.Data) : result.ToProblemDetails();
     }
 
-    /// <summary>Get all users.</summary>
+    /// <summary>Get all users with pagination and search.</summary>
     [HttpGet]
-    public async Task<IResult> GetAllAsync(CancellationToken ct = default)
+    public async Task<IResult> GetAllAsync([FromQuery] UserFilterRequest filter, CancellationToken ct = default)
     {
-        var result = await userService.GetAllAsync(ct);
+        var result = await userService.GetAllAsync(filter, ct);
         return result.IsSuccess ? Results.Ok(result.Data) : result.ToProblemDetails();
     }
 

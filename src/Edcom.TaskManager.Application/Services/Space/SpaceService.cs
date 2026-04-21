@@ -8,32 +8,50 @@ namespace Edcom.TaskManager.Application.Services.Space;
 
 public class SpaceService(AppDbContext dbContext) : ISpaceService
 {
-    public async Task<Result<List<SpaceResponse>>> GetAllByOrgAsync(long orgId, long callerUserId, CancellationToken ct)
+    public async Task<Result<PagedList<SpaceResponse>>> GetAllByOrgAsync(long orgId, long callerUserId, SpaceFilterRequest filter, CancellationToken ct)
     {
         if (!await IsMemberAsync(orgId, callerUserId, ct)) return SpaceErrors.Forbidden;
 
-        var items = await dbContext.Spaces
+        var query = dbContext.Spaces
             .AsNoTracking()
-            .Where(s => s.OrganizationId == orgId && !s.IsDeleted)
-            .OrderBy(s => s.Name)
-            .Select(s => new SpaceResponse
+            .Where(s => s.OrganizationId == orgId && !s.IsDeleted);
+
+        if (!string.IsNullOrWhiteSpace(filter.Search))
+        {
+            var s = $"%{filter.Search}%";
+            query = query.Where(x => EF.Functions.ILike(x.Name, s) || EF.Functions.ILike(x.Slug, s));
+        }
+
+        if (filter.BoardType.HasValue)
+            query = query.Where(x => x.BoardType == filter.BoardType.Value);
+
+        if (filter.IsActive.HasValue)
+            query = query.Where(x => x.IsActive == filter.IsActive.Value);
+
+        var total = await query.CountAsync(ct);
+
+        var items = await query
+            .OrderBy(x => x.Name)
+            .Skip((filter.Page - 1) * filter.PageSize)
+            .Take(filter.PageSize)
+            .Select(x => new SpaceResponse
             {
-                Id              = s.Id,
-                OrganizationId  = s.OrganizationId,
-                Name            = s.Name,
-                Slug            = s.Slug,
-                BoardType       = s.BoardType,
-                IssueKeyPrefix  = s.IssueKeyPrefix,
-                IssueCounter    = s.IssueCounter,
-                IssueCount      = s.Tickets.Count(t => !t.IsDeleted),
-                IsActive        = s.IsActive,
-                CreatedByUserId = s.CreatedByUserId,
-                CreatedAt       = s.CreatedAt,
-                UpdatedAt       = s.UpdatedAt,
+                Id              = x.Id,
+                OrganizationId  = x.OrganizationId,
+                Name            = x.Name,
+                Slug            = x.Slug,
+                BoardType       = x.BoardType,
+                IssueKeyPrefix  = x.IssueKeyPrefix,
+                IssueCounter    = x.IssueCounter,
+                IssueCount      = x.Tickets.Count(t => !t.IsDeleted),
+                IsActive        = x.IsActive,
+                CreatedByUserId = x.CreatedByUserId,
+                CreatedAt       = x.CreatedAt,
+                UpdatedAt       = x.UpdatedAt,
             })
             .ToListAsync(ct);
 
-        return items;
+        return new PagedList<SpaceResponse>(items, filter.Page, filter.PageSize, total);
     }
 
     public async Task<Result<SpaceResponse>> GetByIdAsync(long id, long callerUserId, CancellationToken ct)

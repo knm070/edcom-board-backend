@@ -8,11 +8,11 @@ namespace Edcom.TaskManager.Api.Controllers;
 [Route("api/organizations/{orgId:long}/spaces")]
 public class SpacesController(ISpaceService spaceService) : AuthorizedController
 {
-    /// <summary>Get all spaces in an organization.</summary>
+    /// <summary>Get all spaces in an organization with pagination and search.</summary>
     [HttpGet]
-    public async Task<IResult> GetAllAsync(long orgId, CancellationToken ct = default)
+    public async Task<IResult> GetAllAsync(long orgId, [FromQuery] SpaceFilterRequest filter, CancellationToken ct = default)
     {
-        var result = await spaceService.GetAllByOrgAsync(orgId, UserId, ct);
+        var result = await spaceService.GetAllByOrgAsync(orgId, UserId, filter, ct);
         return result.IsSuccess ? Results.Ok(result.Data) : result.ToProblemDetails();
     }
 
