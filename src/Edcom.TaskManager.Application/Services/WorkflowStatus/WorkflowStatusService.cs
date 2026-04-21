@@ -12,7 +12,7 @@ public class WorkflowStatusService(AppDbContext dbContext) : IWorkflowStatusServ
     {
         var items = await dbContext.WorkflowStatuses
             .AsNoTracking()
-            .Where(w => w.SpaceId == spaceId && !w.IsDeleted)
+            .Where(w => w.SpaceId == spaceId && !w.IsDeleted && w.BaseType != WorkflowStatusBaseType.Backlog)
             .OrderBy(w => w.Position)
             .Select(w => new WorkflowStatusResponse
             {
@@ -125,6 +125,35 @@ public class WorkflowStatusService(AppDbContext dbContext) : IWorkflowStatusServ
         if (!isManager) return WorkflowStatusErrors.Forbidden;
 
         ws.IsDeleted = true;
+        await dbContext.SaveChangesAsync(ct);
+        return Result.Success();
+    }
+
+    public async Task<Result> ReorderAsync(long spaceId, List<long> orderedIds, long callerUserId, CancellationToken ct)
+    {
+        var space = await dbContext.Spaces
+            .AsNoTracking()
+            .Where(s => s.Id == spaceId && !s.IsDeleted)
+            .Select(s => new { s.OrganizationId })
+            .SingleOrDefaultAsync(ct);
+        if (space is null) return WorkflowStatusErrors.NotFound;
+
+        var isManager = await dbContext.OrgMembers
+            .AsNoTracking()
+            .AnyAsync(m => m.OrganizationId == space.OrganizationId && m.UserId == callerUserId
+                        && m.Role == OrgRole.OrgManager && !m.IsDeleted, ct);
+        if (!isManager) return WorkflowStatusErrors.Forbidden;
+
+        var statuses = await dbContext.WorkflowStatuses
+            .Where(w => w.SpaceId == spaceId && !w.IsDeleted)
+            .ToListAsync(ct);
+
+        for (var i = 0; i < orderedIds.Count; i++)
+        {
+            var item = statuses.SingleOrDefault(s => s.Id == orderedIds[i]);
+            if (item is not null) item.Position = i + 1;
+        }
+
         await dbContext.SaveChangesAsync(ct);
         return Result.Success();
     }

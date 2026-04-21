@@ -47,4 +47,12 @@ public class WorkflowStatusesController(IWorkflowStatusService workflowStatusSer
         var result = await workflowStatusService.DeleteAsync(id, UserId, ct);
         return result.IsSuccess ? Results.Ok() : result.ToProblemDetails();
     }
+
+    /// <summary>Reorder workflow statuses. Requires OrgManager role.</summary>
+    [HttpPut("reorder")]
+    public async Task<IResult> ReorderAsync(long spaceId, [FromBody] ReorderWorkflowStatusesRequest request, CancellationToken ct = default)
+    {
+        var result = await workflowStatusService.ReorderAsync(spaceId, request.OrderedIds, UserId, ct);
+        return result.IsSuccess ? Results.Ok() : result.ToProblemDetails();
+    }
 }

@@ -8,11 +8,11 @@ namespace Edcom.TaskManager.Api.Controllers;
 [Route("api/spaces/{spaceId:long}/tickets")]
 public class TicketsController(ITicketService ticketService) : AuthorizedController
 {
-    /// <summary>Get all tickets in a space.</summary>
+    /// <summary>Get all tickets in a space with optional server-side filters.</summary>
     [HttpGet]
-    public async Task<IResult> GetAllAsync(long spaceId, CancellationToken ct = default)
+    public async Task<IResult> GetAllAsync(long spaceId, [FromQuery] GetTicketsFilterRequest filter, CancellationToken ct = default)
     {
-        var result = await ticketService.GetAllBySpaceAsync(spaceId, UserId, ct);
+        var result = await ticketService.GetAllBySpaceAsync(spaceId, filter, UserId, ct);
         return result.IsSuccess ? Results.Ok(result.Data) : result.ToProblemDetails();
     }
 
@@ -47,5 +47,13 @@ public class TicketsController(ITicketService ticketService) : AuthorizedControl
     {
         var result = await ticketService.DeleteAsync(id, UserId, ct);
         return result.IsSuccess ? Results.Ok() : result.ToProblemDetails();
+    }
+
+    /// <summary>Get activity log for a ticket.</summary>
+    [HttpGet("{id:long}/activity")]
+    public async Task<IResult> GetActivityAsync(long spaceId, long id, CancellationToken ct = default)
+    {
+        var result = await ticketService.GetActivityAsync(id, UserId, ct);
+        return result.IsSuccess ? Results.Ok(result.Data) : result.ToProblemDetails();
     }
 }

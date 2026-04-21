@@ -97,10 +97,17 @@ public class OrgMemberService(AppDbContext dbContext) : IOrgMemberService
     {
         if (!await IsAuthorizedAsync(orgId, callerUserId, ct)) return OrgMemberErrors.Forbidden;
 
-        var alreadyMember = await dbContext.OrgMembers
-            .AsNoTracking()
-            .AnyAsync(m => m.OrganizationId == orgId && m.UserId == request.UserId && !m.IsDeleted, ct);
-        if (alreadyMember) return OrgMemberErrors.AlreadyMember;
+        var existing = await dbContext.OrgMembers
+            .SingleOrDefaultAsync(m => m.OrganizationId == orgId && m.UserId == request.UserId, ct);
+
+        if (existing is not null)
+        {
+            if (!existing.IsDeleted) return OrgMemberErrors.AlreadyMember;
+            existing.IsDeleted = false;
+            existing.Role      = request.Role;
+            await dbContext.SaveChangesAsync(ct);
+            return Result.Success();
+        }
 
         dbContext.OrgMembers.Add(new OrgMemberEntity
         {

@@ -140,4 +140,58 @@ public class UserService(AppDbContext dbContext, PasswordHasher passwordHasher) 
         await dbContext.SaveChangesAsync(ct);
         return Result.Success();
     }
+
+    public async Task<Result> UpdateProfileAsync(long targetUserId, UpdateUserProfileRequest request, CancellationToken ct)
+    {
+        var emailTaken = await dbContext.Users
+            .AsNoTracking()
+            .AnyAsync(u => u.Email == request.Email && u.Id != targetUserId && !u.IsDeleted, ct);
+        if (emailTaken) return UserErrors.EmailAlreadyExists;
+
+        var user = await dbContext.Users
+            .SingleOrDefaultAsync(u => u.Id == targetUserId && !u.IsDeleted, ct);
+        if (user is null) return UserErrors.NotFound;
+
+        user.FullName = request.FullName;
+        user.Email    = request.Email;
+        await dbContext.SaveChangesAsync(ct);
+        return Result.Success();
+    }
+
+    public async Task<Result> DeleteAsync(long callerUserId, long targetUserId, CancellationToken ct)
+    {
+        if (callerUserId == targetUserId)
+            return UserErrors.CannotDeleteSelf;
+
+        var user = await dbContext.Users
+            .SingleOrDefaultAsync(u => u.Id == targetUserId && !u.IsDeleted, ct);
+        if (user is null) return UserErrors.NotFound;
+
+        user.IsDeleted = true;
+        await dbContext.SaveChangesAsync(ct);
+        return Result.Success();
+    }
+
+    public async Task<Result<List<UserOrgResponse>>> GetUserOrgsAsync(long userId, CancellationToken ct)
+    {
+        var exists = await dbContext.Users
+            .AsNoTracking()
+            .AnyAsync(u => u.Id == userId && !u.IsDeleted, ct);
+        if (!exists) return UserErrors.NotFound;
+
+        var memberships = await dbContext.OrgMembers
+            .AsNoTracking()
+            .Where(m => m.UserId == userId && !m.IsDeleted && !m.Organization.IsDeleted)
+            .Select(m => new UserOrgResponse
+            {
+                MembershipId = m.Id,
+                OrgId        = m.Organization.Id,
+                OrgName      = m.Organization.Name,
+                Role         = m.Role.ToString(),
+                JoinedAt     = m.CreatedAt,
+            })
+            .ToListAsync(ct);
+
+        return memberships;
+    }
 }

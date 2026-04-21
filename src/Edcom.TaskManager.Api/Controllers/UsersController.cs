@@ -58,4 +58,31 @@ public class UsersController(IUserService userService) : AuthorizedController
         var result = await userService.UpdateAdminAsync(UserId, id, request, ct);
         return result.IsSuccess ? Results.Ok() : result.ToProblemDetails();
     }
+
+    /// <summary>Update user full name and email. System admin only.</summary>
+    [HttpPatch("{id:long}/profile")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IResult> UpdateProfileAsync(long id, [FromBody] UpdateUserProfileRequest request, CancellationToken ct = default)
+    {
+        var result = await userService.UpdateProfileAsync(id, request, ct);
+        return result.IsSuccess ? Results.Ok() : result.ToProblemDetails();
+    }
+
+    /// <summary>Get organizations a user belongs to. System admin only.</summary>
+    [HttpGet("{id:long}/organizations")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IResult> GetUserOrgsAsync(long id, CancellationToken ct = default)
+    {
+        var result = await userService.GetUserOrgsAsync(id, ct);
+        return result.IsSuccess ? Results.Ok(result.Data) : result.ToProblemDetails();
+    }
+
+    /// <summary>Delete a user (soft delete). System admin only.</summary>
+    [HttpDelete("{id:long}")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IResult> DeleteAsync(long id, CancellationToken ct = default)
+    {
+        var result = await userService.DeleteAsync(UserId, id, ct);
+        return result.IsSuccess ? Results.Ok() : result.ToProblemDetails();
+    }
 }

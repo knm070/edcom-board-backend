@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Edcom.TaskManager.Application.Services.Space.Contracts;
 using Edcom.TaskManager.Domain.Enums;
 using Edcom.TaskManager.Infrastructure.Persistence;
@@ -104,20 +105,29 @@ public class SpaceService(AppDbContext dbContext) : ISpaceService
 
     public async Task<Result> AddAsync(long orgId, CreateSpaceRequest request, long callerUserId, CancellationToken ct)
     {
-        if (!await IsAuthorizedAsync(orgId, callerUserId, ct)) return SpaceErrors.Forbidden;
+        if (!await IsMemberAsync(orgId, callerUserId, ct)) return SpaceErrors.Forbidden;
 
-        var slugTaken = await dbContext.Spaces
-            .AsNoTracking()
-            .AnyAsync(s => s.OrganizationId == orgId && s.Slug == request.Slug && !s.IsDeleted, ct);
-        if (slugTaken) return SpaceErrors.SlugAlreadyExists;
+        var baseSlug = string.IsNullOrWhiteSpace(request.Slug)
+            ? ToSlug(request.Name)
+            : request.Slug.Trim().ToLower();
+
+        var slug    = baseSlug;
+        var attempt = 2;
+        while (await dbContext.Spaces.AsNoTracking()
+                   .AnyAsync(s => s.OrganizationId == orgId && s.Slug == slug && !s.IsDeleted, ct))
+            slug = $"{baseSlug}-{attempt++}";
+
+        var prefix = string.IsNullOrWhiteSpace(request.IssueKeyPrefix)
+            ? ToPrefix(request.Name)
+            : request.IssueKeyPrefix.ToUpper();
 
         var space = new SpaceEntity
         {
             OrganizationId  = orgId,
             Name            = request.Name,
-            Slug            = request.Slug,
+            Slug            = slug,
             BoardType       = request.BoardType,
-            IssueKeyPrefix  = request.IssueKeyPrefix.ToUpper(),
+            IssueKeyPrefix  = prefix,
             CreatedByUserId = callerUserId,
         };
 
@@ -128,7 +138,8 @@ public class SpaceService(AppDbContext dbContext) : ISpaceService
             new() { Name = "Backlog",     Color = "#64748b", Position = 0, BaseType = WorkflowStatusBaseType.Backlog },
             new() { Name = "To Do",       Color = "#94a3b8", Position = 1, BaseType = WorkflowStatusBaseType.ToDo },
             new() { Name = "In Progress", Color = "#3b82f6", Position = 2, BaseType = WorkflowStatusBaseType.InProgress },
-            new() { Name = "Done",        Color = "#22c55e", Position = 3, BaseType = WorkflowStatusBaseType.Done },
+            new() { Name = "In Review",   Color = "#f59e0b", Position = 3, BaseType = WorkflowStatusBaseType.InReview },
+            new() { Name = "Done",        Color = "#22c55e", Position = 4, BaseType = WorkflowStatusBaseType.Done },
         ];
 
         await dbContext.SaveChangesAsync(ct);
@@ -161,5 +172,16 @@ public class SpaceService(AppDbContext dbContext) : ISpaceService
         space.IsDeleted = true;
         await dbContext.SaveChangesAsync(ct);
         return Result.Success();
+    }
+
+    private static string ToSlug(string name) =>
+        Regex.Replace(name.Trim().ToLower(), @"[^a-z0-9]+", "-").Trim('-');
+
+    private static string ToPrefix(string name)
+    {
+        var words = name.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return words.Length >= 2
+            ? string.Concat(words.Take(4).Select(w => char.ToUpper(w[0])))
+            : name.Length >= 3 ? name[..3].ToUpper() : name.ToUpper();
     }
 }

@@ -11,4 +11,7 @@ public interface IUserService
     Task<Result> UpdateMeAsync(long callerUserId, UpdateMeRequest request, CancellationToken ct);
     Task<Result> UpdateStatusAsync(long callerUserId, long targetUserId, UpdateUserStatusRequest request, CancellationToken ct);
     Task<Result> UpdateAdminAsync(long callerUserId, long targetUserId, UpdateUserAdminRequest request, CancellationToken ct);
+    Task<Result> UpdateProfileAsync(long targetUserId, UpdateUserProfileRequest request, CancellationToken ct);
+    Task<Result<List<UserOrgResponse>>> GetUserOrgsAsync(long userId, CancellationToken ct);
+    Task<Result> DeleteAsync(long callerUserId, long targetUserId, CancellationToken ct);
 }
