@@ -76,3 +76,10 @@ public enum NotificationType
     SprintCompleted     = 6,
     InviteReceived      = 7,
 }
+
+public enum EpicStatus
+{
+    ToDo       = 1,
+    InProgress = 2,
+    Done       = 3,
+}

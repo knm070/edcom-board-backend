@@ -8,7 +8,7 @@ namespace Edcom.TaskManager.Api.Controllers;
 [Route("api/spaces/{spaceId:long}/epics")]
 public class EpicsController(IEpicService epicService) : AuthorizedController
 {
-    /// <summary>Get all epics for a space.</summary>
+    /// <summary>Get all epics for a space with progress rollup.</summary>
     [HttpGet]
     public async Task<IResult> GetAllAsync(long spaceId, CancellationToken ct = default)
     {
@@ -40,11 +40,51 @@ public class EpicsController(IEpicService epicService) : AuthorizedController
         return result.IsSuccess ? Results.Ok() : result.ToProblemDetails();
     }
 
-    /// <summary>Delete epic (soft delete). Requires OrgManager role.</summary>
+    /// <summary>Delete epic (soft delete). Fails if epic has active tickets. Requires OrgManager role.</summary>
     [HttpDelete("{id:long}")]
     public async Task<IResult> DeleteAsync(long spaceId, long id, CancellationToken ct = default)
     {
         var result = await epicService.DeleteAsync(id, UserId, ct);
+        return result.IsSuccess ? Results.Ok() : result.ToProblemDetails();
+    }
+
+    /// <summary>Get detailed progress for an epic (ticket counts + story point rollup).</summary>
+    [HttpGet("{id:long}/progress")]
+    public async Task<IResult> GetProgressAsync(long spaceId, long id, CancellationToken ct = default)
+    {
+        var result = await epicService.GetProgressAsync(id, ct);
+        return result.IsSuccess ? Results.Ok(result.Data) : result.ToProblemDetails();
+    }
+
+    /// <summary>Transition epic status. Requires OrgManager role.</summary>
+    [HttpPatch("{id:long}/status")]
+    public async Task<IResult> UpdateStatusAsync(long spaceId, long id, [FromBody] UpdateEpicStatusRequest request, CancellationToken ct = default)
+    {
+        var result = await epicService.UpdateStatusAsync(id, request, UserId, ct);
+        return result.IsSuccess ? Results.Ok() : result.ToProblemDetails();
+    }
+
+    /// <summary>Reorder epics within a space. Requires OrgManager role.</summary>
+    [HttpPost("reorder")]
+    public async Task<IResult> ReorderAsync(long spaceId, [FromBody] ReorderEpicsRequest request, CancellationToken ct = default)
+    {
+        var result = await epicService.ReorderAsync(spaceId, request, UserId, ct);
+        return result.IsSuccess ? Results.Ok() : result.ToProblemDetails();
+    }
+
+    /// <summary>Assign an existing ticket to this epic. Requires OrgManager role.</summary>
+    [HttpPost("{id:long}/tickets/{ticketId:long}")]
+    public async Task<IResult> AssignTicketAsync(long spaceId, long id, long ticketId, CancellationToken ct = default)
+    {
+        var result = await epicService.AssignTicketAsync(id, ticketId, UserId, ct);
+        return result.IsSuccess ? Results.Ok() : result.ToProblemDetails();
+    }
+
+    /// <summary>Detach a ticket from this epic (sets EpicId = null). Requires OrgManager role.</summary>
+    [HttpDelete("{id:long}/tickets/{ticketId:long}")]
+    public async Task<IResult> DetachTicketAsync(long spaceId, long id, long ticketId, CancellationToken ct = default)
+    {
+        var result = await epicService.DetachTicketAsync(id, ticketId, UserId, ct);
         return result.IsSuccess ? Results.Ok() : result.ToProblemDetails();
     }
 }

@@ -1,3 +1,5 @@
+using Edcom.TaskManager.Domain.Enums;
+
 namespace Edcom.TaskManager.Application.Services.Epic.Contracts;
 
 public class CreateEpicRequest
@@ -7,4 +9,6 @@ public class CreateEpicRequest
     public string Color { get; set; } = "#7F77DD";
     public DateTime? StartDate { get; set; }
     public DateTime? EndDate { get; set; }
+    public EpicStatus Status { get; set; } = EpicStatus.ToDo;
+    public long? OwnerId { get; set; }
 }

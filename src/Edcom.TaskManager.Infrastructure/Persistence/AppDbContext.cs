@@ -144,6 +144,18 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             .HasForeignKey(e => e.CreatedByUserId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        modelBuilder.Entity<Epic>()
+            .HasOne(e => e.Owner)
+            .WithMany()
+            .HasForeignKey(e => e.OwnerId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        modelBuilder.Entity<Epic>()
+            .HasIndex(e => new { e.SpaceId, e.RankOrder });
+
+        modelBuilder.Entity<Epic>()
+            .HasIndex(e => new { e.SpaceId, e.Status });
+
         // ── Ticket ───────────────────────────────────────────────────────────
         modelBuilder.Entity<Ticket>()
             .HasIndex(t => new { t.SpaceId, t.KeyNumber }).IsUnique();
