@@ -132,6 +132,97 @@ public class SprintService(AppDbContext dbContext) : ISprintService
         return Result.Success();
     }
 
+    public async Task<Result> StartAsync(long sprintId, long callerUserId, CancellationToken ct)
+    {
+        var sprint = await dbContext.Sprints
+            .SingleOrDefaultAsync(s => s.Id == sprintId && !s.IsDeleted, ct);
+        if (sprint is null) return SprintErrors.NotFound;
+
+        var space = await dbContext.Spaces
+            .AsNoTracking()
+            .Where(s => s.Id == sprint.SpaceId && !s.IsDeleted)
+            .Select(s => new { s.OrganizationId })
+            .SingleOrDefaultAsync(ct);
+
+        if (space is null || !await IsAuthorizedAsync(space.OrganizationId, callerUserId, ct))
+            return SprintErrors.Forbidden;
+
+        sprint.Status    = SprintStatus.Active;
+        sprint.StartDate ??= DateTime.UtcNow;
+
+        // Move all backlog-status tickets in this sprint to the initial (To Do) status
+        var toDoStatusId = await dbContext.WorkflowStatuses
+            .AsNoTracking()
+            .Where(w => w.SpaceId == sprint.SpaceId && !w.IsDeleted && w.BaseType == WorkflowStatusBaseType.ToDo)
+            .Select(w => (long?)w.Id)
+            .FirstOrDefaultAsync(ct);
+
+        if (toDoStatusId.HasValue)
+        {
+            var backlogTickets = await dbContext.Tickets
+                .Include(t => t.Status)
+                .Where(t => t.SprintId == sprintId && !t.IsDeleted
+                         && t.Status != null && t.Status.BaseType == WorkflowStatusBaseType.Backlog)
+                .ToListAsync(ct);
+
+            foreach (var ticket in backlogTickets)
+                ticket.StatusId = toDoStatusId.Value;
+        }
+
+        await dbContext.SaveChangesAsync(ct);
+        return Result.Success();
+    }
+
+    public async Task<Result> CompleteAsync(long sprintId, CompleteSprintRequest request, long callerUserId, CancellationToken ct)
+    {
+        var sprint = await dbContext.Sprints
+            .SingleOrDefaultAsync(s => s.Id == sprintId && !s.IsDeleted, ct);
+        if (sprint is null) return SprintErrors.NotFound;
+
+        var space = await dbContext.Spaces
+            .AsNoTracking()
+            .Where(s => s.Id == sprint.SpaceId && !s.IsDeleted)
+            .Select(s => new { s.OrganizationId })
+            .SingleOrDefaultAsync(ct);
+
+        if (space is null || !await IsAuthorizedAsync(space.OrganizationId, callerUserId, ct))
+            return SprintErrors.Forbidden;
+
+        sprint.Status  = SprintStatus.Completed;
+        sprint.EndDate ??= DateTime.UtcNow;
+
+        // Find all incomplete tickets (not Done status)
+        var incompleteTickets = await dbContext.Tickets
+            .Include(t => t.Status)
+            .Where(t => t.SprintId == sprintId && !t.IsDeleted
+                     && (t.Status == null || t.Status.BaseType != WorkflowStatusBaseType.Done))
+            .ToListAsync(ct);
+
+        if (request.Disposition == "next_sprint" && request.TargetSprintId.HasValue)
+        {
+            foreach (var ticket in incompleteTickets)
+                ticket.SprintId = request.TargetSprintId.Value;
+        }
+        else
+        {
+            var backlogStatusId = await dbContext.WorkflowStatuses
+                .AsNoTracking()
+                .Where(w => w.SpaceId == sprint.SpaceId && !w.IsDeleted && w.BaseType == WorkflowStatusBaseType.Backlog)
+                .Select(w => (long?)w.Id)
+                .FirstOrDefaultAsync(ct);
+
+            foreach (var ticket in incompleteTickets)
+            {
+                ticket.SprintId = null;
+                if (backlogStatusId.HasValue)
+                    ticket.StatusId = backlogStatusId.Value;
+            }
+        }
+
+        await dbContext.SaveChangesAsync(ct);
+        return Result.Success();
+    }
+
     public async Task<Result> DeleteAsync(long id, long callerUserId, CancellationToken ct)
     {
         var sprint = await dbContext.Sprints

@@ -148,7 +148,9 @@ public class TicketService(AppDbContext dbContext) : ITicketService
 
             if (statusBaseType == WorkflowStatusBaseType.Backlog)
             {
-                resolvedSprintId = null;
+                // Backlog status + explicit sprintId = pre-assigned to planned sprint (stays in backlog)
+                // Backlog status + no sprintId = standalone backlog ticket
+                resolvedSprintId = request.SprintId;
             }
             else if (!request.SprintId.HasValue)
             {
@@ -223,8 +225,9 @@ public class TicketService(AppDbContext dbContext) : ITicketService
 
             if (statusBaseType == WorkflowStatusBaseType.Backlog)
             {
-                // Moving to backlog status → remove from sprint
-                ticket.SprintId = null;
+                // Backlog status + explicit sprintId = pre-assigned to a planned sprint (still in backlog)
+                // Backlog status + no sprintId = standalone backlog (remove from sprint)
+                ticket.SprintId = request.SprintId;
             }
             else if (ticket.SprintId == null)
             {

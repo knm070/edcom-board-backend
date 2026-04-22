@@ -40,6 +40,22 @@ public class SprintsController(ISprintService sprintService) : AuthorizedControl
         return result.IsSuccess ? Results.Ok() : result.ToProblemDetails();
     }
 
+    /// <summary>Start a sprint. Moves all backlog-status tickets in the sprint to the initial workflow status. Requires OrgManager role.</summary>
+    [HttpPost("{id:long}/start")]
+    public async Task<IResult> StartAsync(long spaceId, long id, CancellationToken ct = default)
+    {
+        var result = await sprintService.StartAsync(id, UserId, ct);
+        return result.IsSuccess ? Results.Ok() : result.ToProblemDetails();
+    }
+
+    /// <summary>Complete a sprint. Moves incomplete tickets to backlog or a target planned sprint. Requires OrgManager role.</summary>
+    [HttpPost("{id:long}/complete")]
+    public async Task<IResult> CompleteAsync(long spaceId, long id, [FromBody] CompleteSprintRequest request, CancellationToken ct = default)
+    {
+        var result = await sprintService.CompleteAsync(id, request, UserId, ct);
+        return result.IsSuccess ? Results.Ok() : result.ToProblemDetails();
+    }
+
     /// <summary>Delete sprint (soft delete). Requires OrgManager role.</summary>
     [HttpDelete("{id:long}")]
     public async Task<IResult> DeleteAsync(long spaceId, long id, CancellationToken ct = default)

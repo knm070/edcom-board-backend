@@ -12,7 +12,7 @@ public class WorkflowStatusService(AppDbContext dbContext) : IWorkflowStatusServ
     {
         var items = await dbContext.WorkflowStatuses
             .AsNoTracking()
-            .Where(w => w.SpaceId == spaceId && !w.IsDeleted && w.BaseType != WorkflowStatusBaseType.Backlog)
+            .Where(w => w.SpaceId == spaceId && !w.IsDeleted)
             .OrderBy(w => w.Position)
             .Select(w => new WorkflowStatusResponse
             {
